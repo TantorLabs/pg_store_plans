@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "type_traits": "cpp",
+        "htup_details.h": "c"
+    }
+}

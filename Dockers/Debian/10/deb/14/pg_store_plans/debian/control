@@ -1,0 +1,11 @@
+Source:         pg-store-plans-14
+Section:        custom
+Priority:       optional
+Maintainer:     NTT OSS Center DBMS Development and Support Team
+Standards-Version: 1.0
+
+Package:        pg-store-plans-14
+Architecture:   amd64
+Section:        database
+Depends: libc6 (>= 2.7), postgresql-14 , llvm-7, llvm-7-dev, llvm-7-runtime
+Description:    Record executed plans on PostgreSQL 14

@@ -1,0 +1,6 @@
+chown root.root /usr/lib/postgresql/14/lib/pg_store_plans*
+chown root.root /usr/share/postgresql/14/extension/pg_store_plans*
+chmod 0755 /usr/lib/postgresql/14/lib/pg_store_plans.so
+chmod 0644 /usr/share/postgresql/14/extension/pg_store_plans*
+chmod 0644 /usr/lib/postgresql/14/lib/bitcode/pg_store_plans/
+cd '/usr/lib/postgresql/14/lib/bitcode' && /usr/lib/llvm-11/bin/llvm-lto -thinlto -thinlto-action=thinlink -o pg_store_plans.index.bc pg_store_plans/pg_store_plans.bc pg_store_plans/pgsp_json.bc pg_store_plans/pgsp_json_text.bc pg_store_plans/pgsp_explain.bc

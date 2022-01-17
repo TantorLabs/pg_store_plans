@@ -1,0 +1,4 @@
+chown root.root /usr/lib/postgresql/10/lib/pg_store_plans*
+chown root.root /usr/share/postgresql/10/extension/pg_store_plans*
+chmod 0755 /usr/lib/postgresql/10/lib/pg_store_plans.so
+chmod 0644 /usr/share/postgresql/10/extension/pg_store_plans*

@@ -37,8 +37,12 @@ ifneq ($(shell uname), SunOS)
 LDFLAGS+=-Wl,--build-id
 endif
 
+BASE_DIR=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+USEDPATH:= usr/lib/postgresql
+SHAREPATH:= usr/share/postgresql
 ## These entries need running server
 DBNAME = postgres
+PG_BUILD_VERSION=$(if $(PG_MAKE_VERSION),$(PG_MAKE_VERSION),14)
 
 rpms: rpm14
 
@@ -54,6 +58,42 @@ $(STARBALLS): $(TARSOURCES)
 
 rpm14: $(STARBALL14)
 	MAKE_ROOT=`pwd` rpmbuild -bb SPECS/pg_store_plans14.spec
+
+build-rpms:
+	@echo Creating RPMSs ; \
+	RPMS="${PG_BUILD_VERSION}" ; \
+	for dir_path in $${RPMS}; do \
+		echo "Creating rpm for postgresql $${dir_path}" ; \
+		rm -rf rpm/$${dir_path}/RPMS && \
+		export QA_SKIP_RPATHS=1 && rpmbuild -bb -D "_topdir $(BASE_DIR)/rpm/$${dir_path}" $(BASE_DIR)/rpm/$${dir_path}/SPECS/pg_store_plans$${dir_path}.spec && \
+		echo "Created rpm for postgresql $${dir_path}" ; \
+		cd $(BASE_DIR) ; \
+	done
+
+build-debs: 
+	@echo Creating DEBs ; \
+	DEB="${PG_BUILD_VERSION}" ; \
+	for dir_path in $${DEB}; do \
+		echo "Creating deb for postgresql $${dir_path}" ; \
+		rm -rf deb/$${dir_path}/pg_store_plans/*.deb && \
+		mkdir -p $(BASE_DIR)/deb/$${dir_path}/pg_store_plans/${USEDPATH}/$${dir_path}/lib/bitcode/pg_store_plans  && \
+		mkdir -p $(BASE_DIR)/deb/$${dir_path}/pg_store_plans/$(SHAREPATH)/$${dir_path}/extension/ && \
+		/usr/bin/install -c -m 755 pg_store_plans.so $(BASE_DIR)/deb/$${dir_path}/pg_store_plans/${USEDPATH}/$${dir_path}/lib/pg_store_plans.so && \
+		/usr/bin/install -c -m 644 pg_store_plans.control $(BASE_DIR)/deb/$${dir_path}/pg_store_plans/$(SHAREPATH)/$${dir_path}/extension && \
+		/usr/bin/install -c -m 644 pg_store_plans--1.6.sql  $(BASE_DIR)/deb/$${dir_path}/pg_store_plans/$(SHAREPATH)/$${dir_path}/extension && \
+		if [ $${dir_path} != 10 ]; then \
+			/usr/bin/install -c -m 644 pg_store_plans.bc $(BASE_DIR)/deb/$${dir_path}/pg_store_plans/usr/lib/postgresql/$${dir_path}/lib/bitcode/pg_store_plans && \
+			/usr/bin/install -c -m 644 pgsp_json.bc $(BASE_DIR)/deb/$${dir_path}/pg_store_plans/usr/lib/postgresql/$${dir_path}/lib/bitcode/pg_store_plans/./ && \
+			/usr/bin/install -c -m 644 pgsp_json_text.bc $(BASE_DIR)/deb/$${dir_path}/pg_store_plans/usr/lib/postgresql/$${dir_path}/lib/bitcode/pg_store_plans/./ && \
+			/usr/bin/install -c -m 644 pgsp_explain.bc $(BASE_DIR)/deb/$${dir_path}/pg_store_plans/usr/lib/postgresql/$${dir_path}/lib/bitcode/pg_store_plans/./ ; \
+		fi ; \
+		cd $(BASE_DIR)/deb/$${dir_path}/pg_store_plans && \
+		rm -rf debian/changelog && \
+		dch --create --distribution stable --package "pg-store-plans-$${dir_path}" --newversion 1.6 "Release" && \
+		dpkg-buildpackage -us -uc && \
+		echo "Created deb for postgresql $${dir_path}" ; \
+		cd $(BASE_DIR) ; \
+	done
 
 testfiles: convert.out convert.sql
 

@@ -1,0 +1,11 @@
+Source:         pg-store-plans-11
+Section:        custom
+Priority:       optional
+Maintainer:     NTT OSS Center DBMS Development and Support Team
+Standards-Version: 1.0
+
+Package:        pg-store-plans-11
+Architecture:   amd64
+Section:        database
+Depends: libc6 (>= 2.7), postgresql-11, llvm-9, llvm-9-dev, llvm-9-runtime
+Description:    Record executed plans on PostgreSQL 11
