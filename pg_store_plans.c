@@ -39,7 +39,13 @@
 
 #include "catalog/pg_authid.h"
 #include "commands/explain.h"
+#if PG_VERSION_NUM >= 150000
+#include "common/pg_prng.h"
+#endif
 #include "access/hash.h"
+#if PG_VERSION_NUM <= 120000
+#include "access/htup_details.h"
+#endif
 #include "executor/instrument.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
@@ -57,6 +63,9 @@
 #include "utils/queryjumble.h"
 #endif
 #include "utils/timestamp.h"
+#if PG_VERSION_NUM <= 110000
+#include "utils/memutils.h"
+#endif
 
 #include "pgsp_json.h"
 #include "pgsp_explain.h"
@@ -90,6 +99,10 @@ typedef uint64 queryid_t;
 #else
 typedef uint32 queryid_t;
 #define PGSP_NO_QUERYID		0
+#endif
+
+#if PG_VERSION_NUM <= 120000
+#define pg_pwrite pwrite
 #endif
 
 /*
@@ -258,16 +271,22 @@ static const struct config_enum_entry plan_storage_options[] =
 static int	store_size;			/* max # statements to track */
 static int	track_level;		/* tracking level */
 static int	min_duration;		/* min duration to record */
+static int	slow_statement_duration;	/* slow log to record */
 static bool dump_on_shutdown;	/* whether to save stats across shutdown */
 static bool log_analyze;		/* Similar to EXPLAIN (ANALYZE *) */
 static bool log_verbose;		/* Similar to EXPLAIN (VERBOSE *) */
 static bool log_buffers;		/* Similar to EXPLAIN (BUFFERS *) */
 static bool log_timing;			/* Similar to EXPLAIN (TIMING *) */
 static bool log_triggers;		/* whether to log trigger statistics  */
+static bool store_last_plan;    /* always update plan */
+static double sample_rate = 1;  /* sample rate */
 static int  plan_format;		/* Plan representation style in
 								 * pg_store_plans.plan  */
 static int  plan_storage;		/* Plan storage type */
 
+
+/* Is the current top-level query to be sampled? */
+static bool current_query_sampled = false;
 
 /* disables tracking overriding track_level */
 static bool force_disabled = false;
@@ -283,7 +302,8 @@ static bool force_disabled = false;
 	(!force_disabled &&											  \
 	 (track_level >= TRACK_LEVEL_ALL ||							  \
 	  (track_level == TRACK_LEVEL_TOP && nested_level == 0)) &&	  \
-	 (q != PGSP_NO_QUERYID))
+	 (q != PGSP_NO_QUERYID) && \
+	 current_query_sampled)
 #else
 #define pgsp_enabled(q) \
 	(!force_disabled &&											\
@@ -468,7 +488,20 @@ _PG_init(void)
 							0,
 							INT_MAX,
 							PGC_SUSET,
+							GUC_UNIT_MS,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomIntVariable("pg_store_plans.slow_statement_duration",
+					"Unconditional record plan of slow statement.",
+							NULL,
+							&slow_statement_duration,
 							0,
+							0,
+							INT_MAX,
+							PGC_SUSET,
+							GUC_UNIT_MS,
 							NULL,
 							NULL,
 							NULL);
@@ -478,6 +511,17 @@ _PG_init(void)
 							 NULL,
 							 &dump_on_shutdown,
 							 true,
+							 PGC_SIGHUP,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("pg_store_plans.store_last_plan",
+			   "Always update text of stored plan.",
+							 NULL,
+							 &store_last_plan,
+							 false,
 							 PGC_SIGHUP,
 							 0,
 							 NULL,
@@ -533,6 +577,19 @@ _PG_init(void)
 							 NULL,
 							 &log_verbose,
 							 false,
+							 PGC_SUSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomRealVariable("pg_store_plans.sample_rate",
+                          "Fraction of queries to process.",
+							 NULL,
+							 &sample_rate,
+							 1.0,
+							 0.0,
+							 1.0,
 							 PGC_SUSET,
 							 0,
 							 NULL,
@@ -951,6 +1008,13 @@ pgsp_ExecutorStart(QueryDesc *queryDesc, int eflags)
 			(log_buffers ? INSTRUMENT_BUFFERS : 0);
 	}
 
+#if PG_VERSION_NUM >= 150000
+	current_query_sampled = (pg_prng_double(&pg_global_prng_state) <
+									sample_rate);
+#else
+	current_query_sampled = (random() < (sample_rate *((double) MAX_RANDOM_VALUE + 1)));
+#endif
+
 	if (prev_ExecutorStart)
 		prev_ExecutorStart(queryDesc, eflags);
 	else
@@ -1037,10 +1101,12 @@ pgsp_ExecutorEnd(QueryDesc *queryDesc)
 		 */
 		InstrEndLoop(queryDesc->totaltime);
 
-		if (pgsp_enabled(queryDesc->plannedstmt->queryId) &&
+		if ((pgsp_enabled(queryDesc->plannedstmt->queryId) &&
 			queryDesc->totaltime->total &&
 			queryDesc->totaltime->total >=
-			(double)min_duration / 1000.0)
+			(double)min_duration / 1000.0) ||
+            (slow_statement_duration > 0 && nested_level == 0 && queryDesc->totaltime &&
+                queryDesc->totaltime->total >= (double)slow_statement_duration / 1000.0))
 		{
 			queryid_t	  queryid;
 			ExplainState *es;
@@ -1079,8 +1145,9 @@ pgsp_ExecutorEnd(QueryDesc *queryDesc)
 			 * For pg14 and above, core postgres can compute a queryid so we
 			 * will rely on it.
 			 */
-			if (queryid == PGSP_NO_QUERYID)
-				queryid = (queryid_t) hash_query(queryDesc->sourceText);
+			// if (queryid == PGSP_NO_QUERYID)
+			//	queryid = (queryid_t) hash_query(queryDesc->sourceText);
+			// Note: AB: disabled per vadv version
 #else
 			Assert(queryid != PGSP_NO_QUERYID);
 #endif
@@ -1219,27 +1286,31 @@ pgsp_store(char *plan, queryid_t queryId,
 	key.queryid = queryId;
 
 	normalized_plan = pgsp_json_normalize(plan);
-	shorten_plan = pgsp_json_shorten(plan);
-	elog(DEBUG3, "pg_store_plans: Normalized plan: %s", normalized_plan);
-	elog(DEBUG3, "pg_store_plans: Shorten plan: %s", shorten_plan);
-	elog(DEBUG3, "pg_store_plans: Original plan: %s", plan);
-	plan_len = strlen(shorten_plan);
 
 	key.planid = hash_any((const unsigned char *)normalized_plan,
 						  strlen(normalized_plan));
-	pfree(normalized_plan);
-
-	if (plan_len >= shared_state->plan_size)
-		plan_len = pg_encoding_mbcliplen(GetDatabaseEncoding(),
-										 shorten_plan,
-										 plan_len,
-										 shared_state->plan_size - 1);
 
 
 	/* Look up the hash table entry with shared lock. */
 	LWLockAcquire(shared_state->lock, LW_SHARED);
 
 	entry = (pgspEntry *) hash_search(hash_table, &key, HASH_FIND, NULL);
+
+	if (!entry)
+	{
+		shorten_plan = pgsp_json_shorten(plan);
+		elog(DEBUG3, "pg_store_plans: Normalized plan: %s", normalized_plan);
+		elog(DEBUG3, "pg_store_plans: Shorten plan: %s", shorten_plan);
+		elog(DEBUG3, "pg_store_plans: Original plan: %s", plan);
+		plan_len = strlen(shorten_plan);
+
+		if (plan_len >= shared_state->plan_size)
+			plan_len = pg_encoding_mbcliplen(GetDatabaseEncoding(),
+											shorten_plan,
+											plan_len,
+											shared_state->plan_size - 1);
+	}
+	pfree(normalized_plan);
 
 	/* Store the plan text, if the entry not present */
 	if (!entry && plan_storage == PLAN_STORAGE_FILE)
