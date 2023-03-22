@@ -76,7 +76,6 @@ rm -rf %{buildroot}
 %{_libdir}/pg_store_plans.so
 %defattr(0644,root,root)
 %{_datadir}/extension/pg_store_plans--1.6.sql
-%{_datadir}/extension/pg_store_plans--1.6--1.6.1.sql
 %{_datadir}/extension/pg_store_plans.control
 
 %files llvmjit
