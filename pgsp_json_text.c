@@ -1014,7 +1014,9 @@ pgsp_json_textize(char *json)
 	init_parser_context(&ctx, PGSP_JSON_TEXTIZE, json, NULL, 0);
 
 	ctx.nodevals = (node_vals*)palloc0(sizeof(node_vals));
-
+	if (ctx.nodevals == NULL)
+		return NULL;
+		
 	sem.semstate = (void*)&ctx;
 	sem.object_start       = json_text_objstart;
 	sem.object_end         = json_text_objend;
