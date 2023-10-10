@@ -778,6 +778,8 @@ pgsp_shmem_startup(void)
 
 	buffer_size = plan_size;
 	buffer = (char *) palloc(buffer_size);
+	if (buffer == NULL)
+		goto fail;
 
 	if (fread(&header, sizeof(uint32), 1, file) != 1 ||
 		fread(&pgver, sizeof(uint32), 1, file) != 1 ||
@@ -805,6 +807,8 @@ pgsp_shmem_startup(void)
 		if (temp.plan_len >= buffer_size)
 		{
 			buffer = (char *) repalloc(buffer, temp.plan_len + 1);
+			if (buffer == NULL)
+				goto fail;
 			buffer_size = temp.plan_len + 1;
 		}
 
@@ -900,7 +904,7 @@ fail:
 static void
 pgsp_shmem_shutdown(int code, Datum arg)
 {
-	FILE	   *file;
+	FILE	   *file = NULL;
 	char	   *pbuffer = NULL;
 	Size		pbuffer_size = 0;
 	HASH_SEQ_STATUS hash_seq;
@@ -1266,7 +1270,6 @@ pgsp_store(char *plan, queryid_t queryId,
 {
 	pgspHashKey key;
 	pgspEntry  *entry;
-	char	   *norm_query = NULL;
 	int 		plan_len;
 	char	   *normalized_plan = NULL;
 	char	   *shorten_plan = NULL;
@@ -1428,10 +1431,6 @@ pgsp_store(char *plan, queryid_t queryId,
 
 done:
 	LWLockRelease(shared_state->lock);
-
-	/* We postpone this pfree until we're out of the lock */
-	if (norm_query)
-		pfree(norm_query);
 }
 
 /*
@@ -1875,6 +1874,7 @@ entry_dealloc(void)
 	 */
 
 	entries = palloc(hash_get_num_entries(hash_table) * sizeof(pgspEntry *));
+	/* TODO if(entries == NULL) */
 
 	i = 0;
 	tottextlen = 0;
@@ -2029,7 +2029,7 @@ error:
 static char *
 ptext_load_file(Size *buffer_size)
 {
-	char	   *buf;
+	char	   *buf = NULL;
 	int			fd;
 	struct stat stat;
 	Size		nread;
@@ -2198,7 +2198,7 @@ need_gc_ptexts(void)
 static void
 gc_ptexts(void)
 {
-	char	   *pbuffer;
+	char	   *pbuffer = NULL;
 	Size		pbuffer_size;
 	FILE	   *pfile = NULL;
 	HASH_SEQ_STATUS hash_seq;
@@ -2364,7 +2364,7 @@ entry_reset(void)
 {
 	HASH_SEQ_STATUS hash_seq;
 	pgspEntry  *entry;
-	FILE	   *pfile;
+	FILE	   *pfile = NULL;
 
 	if (!shared_state || !hash_table)
 		ereport(ERROR,
