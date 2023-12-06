@@ -24,7 +24,7 @@
 #include "utils/builtins.h"
 #if PG_VERSION_NUM >= 160000
 #define JSON_FUNCTION_RETURN_TYPE JsonParseErrorType
-#define JSON_FUNCTION_RETURN_VALUE return JSON_SUCCESS;
+#define JSON_FUNCTION_RETURN_VALUE JSON_SUCCESS
 #else
 #define JSON_FUNCTION_RETURN_TYPE void
 #define JSON_FUNCTION_RETURN_VALUE
@@ -775,7 +775,7 @@ json_text_objstart(void *state)
 		resetStringInfo(v->group_key);
 		resetStringInfo(v->hash_key);
 	}
-	JSON_FUNCTION_RETURN_VALUE
+	return JSON_FUNCTION_RETURN_VALUE;
 
 }
 
@@ -831,7 +831,7 @@ json_text_objend(void *state)
 	ctx->last_elem_is_object = true;
 	ctx->level--;
 
-	JSON_FUNCTION_RETURN_VALUE
+	return JSON_FUNCTION_RETURN_VALUE;
 }
 
 static JSON_FUNCTION_RETURN_TYPE
@@ -844,7 +844,7 @@ json_text_arrstart(void *state)
 		ctx->wlist_level++;
 	}
 
-	JSON_FUNCTION_RETURN_VALUE
+	return JSON_FUNCTION_RETURN_VALUE;
 }
 
 static JSON_FUNCTION_RETURN_TYPE
@@ -891,7 +891,7 @@ json_text_arrend(void *state)
 		}
 		ctx->wlist_level--;
 	}
-	JSON_FUNCTION_RETURN_VALUE
+	return JSON_FUNCTION_RETURN_VALUE;
 }
 
 static JSON_FUNCTION_RETURN_TYPE
@@ -965,7 +965,7 @@ json_text_ofstart(void *state, char *fname, bool isnull)
 			ctx->section = p->tag;
 		ctx->setter = p->setter;
 	}
-	JSON_FUNCTION_RETURN_VALUE
+	return JSON_FUNCTION_RETURN_VALUE;
 }
 
 static JSON_FUNCTION_RETURN_TYPE
@@ -1007,7 +1007,7 @@ json_text_ofend(void *state, char *fname, bool isnull)
 		}
 		clear_nodeval(v);
 	}
-	JSON_FUNCTION_RETURN_VALUE
+	return JSON_FUNCTION_RETURN_VALUE;
 }
 
 static JSON_FUNCTION_RETURN_TYPE
@@ -1017,7 +1017,7 @@ json_text_scalar(void *state, char *token, JsonTokenType tokentype)
 
 	if (ctx->setter)
 		ctx->setter(ctx->nodevals, token);
-	JSON_FUNCTION_RETURN_VALUE
+	return JSON_FUNCTION_RETURN_VALUE;
 }
 
 char *

@@ -16,7 +16,7 @@
 #include "nodes/parsenodes.h"
 #include "nodes/bitmapset.h"
 #include "parser/scanner.h"
-//#include "parser/gram.h"
+//#include "parser/gram.h"		since 16 version gram.h is private
 #include "utils/xml.h"
 #include "utils/json.h"
 #if PG_VERSION_NUM < 130000
@@ -1080,7 +1080,7 @@ adjust_wbuf(pgspParserContext *ctx, int len)
 	{
 		ctx->wbuf = (char *)palloc(buflen);
 		ctx->wbuflen = buflen;
-	}	
+	}
 }
 
 static char *
