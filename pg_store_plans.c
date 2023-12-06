@@ -59,8 +59,11 @@
 #include "tcop/utility.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
-#if PG_VERSION_NUM >= 140000
+#if PG_VERSION_NUM >= 140000 && PG_VERSION_NUM < 160000 
 #include "utils/queryjumble.h"
+#endif
+#if PG_VERSION_NUM >= 160000
+#include "nodes/queryjumble.h"
 #endif
 #include "utils/timestamp.h"
 #if PG_VERSION_NUM <= 110000
@@ -269,7 +272,7 @@ static const struct config_enum_entry plan_storage_options[] =
 };
 
 static int	store_size;			/* max # statements to track */
-static int	track_level;		/* tracking level */
+static int	track_level = 1;		/* tracking level */
 static int	min_duration;		/* min duration to record */
 static int	slow_statement_duration;	/* slow log to record */
 static bool dump_on_shutdown;	/* whether to save stats across shutdown */
@@ -280,9 +283,9 @@ static bool log_timing;			/* Similar to EXPLAIN (TIMING *) */
 static bool log_triggers;		/* whether to log trigger statistics  */
 static bool store_last_plan;    /* always update plan */
 static double sample_rate = 1;  /* sample rate */
-static int  plan_format;		/* Plan representation style in
+static int  plan_format = 1;		/* Plan representation style in
 								 * pg_store_plans.plan  */
-static int  plan_storage;		/* Plan storage type */
+static int  plan_storage = 1;		/* Plan storage type */
 
 
 /* Is the current top-level query to be sampled? */
