@@ -1629,38 +1629,45 @@ pg_store_plans_internal(FunctionCallInfo fcinfo,
 			else
 				pstr = SHMEM_PLAN_PTR(entry);
 
-			switch (plan_format)
+			if (pstr)
 			{
-				case PLAN_FORMAT_TEXT:
-					mstr = pgsp_json_textize(pstr);
-					break;
-				case PLAN_FORMAT_JSON:
-					mstr = pgsp_json_inflate(pstr);
-					break;
-				case PLAN_FORMAT_YAML:
-					mstr = pgsp_json_yamlize(pstr);
-					break;
-				case PLAN_FORMAT_XML:
-					mstr = pgsp_json_xmlize(pstr);
-					break;
-				default:
-					mstr = pstr;
-					break;
+				switch (plan_format)
+				{
+					case PLAN_FORMAT_TEXT:
+						mstr = pgsp_json_textize(pstr);
+						break;
+					case PLAN_FORMAT_JSON:
+						mstr = pgsp_json_inflate(pstr);
+						break;
+					case PLAN_FORMAT_YAML:
+						mstr = pgsp_json_yamlize(pstr);
+						break;
+					case PLAN_FORMAT_XML:
+						mstr = pgsp_json_xmlize(pstr);
+						break;
+					default:
+						mstr = pstr;
+						break;
+				}
+
+				estr = (char *)
+					pg_do_encoding_conversion((unsigned char *) mstr,
+											strlen(mstr),
+											entry->encoding,
+											GetDatabaseEncoding());
+				values[i++] = CStringGetTextDatum(estr);
+
+				if (estr != mstr)
+					pfree(estr);
+
+				if (mstr != pstr)
+					pfree(mstr);
 			}
-
-			estr = (char *)
-				pg_do_encoding_conversion((unsigned char *) mstr,
-										  strlen(mstr),
-										  entry->encoding,
-										  GetDatabaseEncoding());
-			values[i++] = CStringGetTextDatum(estr);
-
-			if (estr != mstr)
-				pfree(estr);
-
-			if (mstr != pstr)
-				pfree(mstr);
-
+			else
+			{
+				/* Just return a null if we fail to find the text */
+				nulls[i++] = true;
+			}
 			/* pstr is a pointer onto pbuffer */
 		}
 		else
