@@ -433,6 +433,7 @@ conv_strategy(const char *src, pgsp_parser_mode mode)
 			tok == XCONST || tok == ICONST || tok == NULL_P || \
 		    tok == TRUE_P || tok == FALSE_P || \
 			tok == CURRENT_DATE || tok == CURRENT_TIME || \
+			tok == CURRENT_USER || \
 		    tok == LOCALTIME || tok == LOCALTIMESTAMP)
 #define IS_INDENTED_ARRAY(v) ((v) == P_GroupKeys || (v) == P_HashKeys)
 
