@@ -79,7 +79,7 @@ convert.out: convert.sql
 	psql $(DBNAME) -a -q -X -f convert.sql > $@
 
 convert.sql: makeplanfile.sql json2sql.pl
-	psql $(DBNAME) -X -f makeplanfile.sql |& ./json2sql.pl > $@
+	psql $(DBNAME) -X -f makeplanfile.sql  2>&1 | ./json2sql.pl > $@
 
 clean-testfiles:
 	rm -f convert.out convert.sql
