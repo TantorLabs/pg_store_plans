@@ -27,6 +27,12 @@ print ",($plan_no, \'$title\',\n";
 print " $escape'$plan')";
 $plan_no--;
 
+$title = "###### Plan $plan_no: expression tokens 1/1";
+setplan2();
+print ",($plan_no, \'$title\',\n";
+print " $escape'$plan')";
+$plan_no--;
+
 $title = "###### Plan $plan_no: some properties plus unknown key";
 setplan0(1);  # With "Unknown Key"
 print ",($plan_no, \'$title\',\n";
@@ -343,5 +349,15 @@ $plan .= "}";
 
 }
 
+sub setplan2 {
+	my($addunknown) = @_;
+	$plan = << 'EOS';
+{"Output": ["~NULL!1.2@''abc''#0b111^0xfff&123|CURRENT_CATALOG`CURRENT_DATE?CURRENT_ROLE+CURRENT_SCHEMA-CURRENT_TIME*CURRENT_TIMESTAMP/CURRENT_USER%LOCALTIME<LOCALTIMESTAMP>true=false"]}
+EOS
+
+# Avoid trailing new line
+$plan .= "}";
+
+}
 
 
