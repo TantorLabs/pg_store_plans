@@ -1304,6 +1304,9 @@ init_json_lex_context(JsonLexContext *lex, char *json)
 	lex->line_number = 1;
 	lex->input_length = strlen(json);
 	lex->strval = makeStringInfo();
+#if PG_VERSION_NUM >= 170000
+    lex->incremental = false;
+#endif
 }
 
 static void
