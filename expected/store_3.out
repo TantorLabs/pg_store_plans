@@ -2,9 +2,9 @@ SET client_min_messages = 'error';
 CREATE EXTENSION IF NOT EXISTS pg_store_plans;
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 SELECT pg_typeof(pg_stat_statements_reset());
- pg_typeof 
------------
- void
+        pg_typeof         
+--------------------------
+ timestamp with time zone
 (1 row)
 
 SELECT pg_store_plans_reset();
@@ -115,9 +115,9 @@ SELECT test_explain();
 DROP FUNCTION test_explain();
 DROP TABLE t1;
 SELECT pg_typeof(pg_stat_statements_reset());
- pg_typeof 
------------
- void
+        pg_typeof         
+--------------------------
+ timestamp with time zone
 (1 row)
 
 SELECT pg_store_plans_reset(); -- collision with plan id

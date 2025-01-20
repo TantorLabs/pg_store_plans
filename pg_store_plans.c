@@ -1433,8 +1433,10 @@ pgsp_store(char *plan, queryid_t queryId,
 	e->counters.local_blks_written += bufusage->local_blks_written;
 	e->counters.temp_blks_read += bufusage->temp_blks_read;
 	e->counters.temp_blks_written += bufusage->temp_blks_written;
+#if PG_VERSION_NUM < 170000
 	e->counters.blk_read_time += INSTR_TIME_GET_MILLISEC(bufusage->blk_read_time);
 	e->counters.blk_write_time += INSTR_TIME_GET_MILLISEC(bufusage->blk_write_time);
+#endif
 #if PG_VERSION_NUM >= 150000
 	e->counters.temp_blk_read_time += INSTR_TIME_GET_MILLISEC(bufusage->temp_blk_read_time);
 	e->counters.temp_blk_write_time += INSTR_TIME_GET_MILLISEC(bufusage->temp_blk_write_time);
@@ -1762,7 +1764,11 @@ pg_store_plans_internal(FunctionCallInfo fcinfo,
 	free(pbuffer);
 
 	/* clean up and return the tuplestore */
+#if PG_VERSION_NUM < 170000
 	tuplestore_donestoring(tupstore);
+#else
+       tuplestore_rescan(tupstore);
+#endif
 }
 
 /* Number of output arguments (columns) for pg_stat_statements_info */
