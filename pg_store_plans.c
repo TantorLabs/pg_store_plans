@@ -76,7 +76,7 @@
 PG_MODULE_MAGIC;
 
 /* Location of stats file */
-#define PGSP_DUMP_FILE	"global/pg_store_plans.stat"
+#define PGSP_DUMP_FILE	PG_STAT_TMP_DIR "/pg_store_plans.stat"
 #define PGSP_TEXT_FILE	PG_STAT_TMP_DIR "/pgsp_plan_texts.stat"
 
 /* PostgreSQL major version number, changes in which invalidate all entries */
