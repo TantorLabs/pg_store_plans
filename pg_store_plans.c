@@ -158,12 +158,8 @@ typedef struct Counters
 	int64		temp_blks_written;	/* # of temp blocks written */
 	double		blk_read_time;		/* time spent reading, in msec */
 	double		blk_write_time; 	/* time spent writing, in msec */
-
-	double		temp_blk_read_time;	/* time spent reading temp blocks,
-									   in msec */
-	double		temp_blk_write_time;/* time spent writing temp blocks,
-									   in msec */
-
+	double		temp_blk_read_time;	/* time spent reading temp blocks, in msec */
+	double		temp_blk_write_time;/* time spent writing temp blocks, in msec */
 	TimestampTz	first_call;			/* timestamp of first call  */
 	TimestampTz	last_call;			/* timestamp of last call  */
 	double		usage;				/* usage factor */
@@ -1742,14 +1738,16 @@ pg_store_plans_internal(FunctionCallInfo fcinfo,
 		values[i++] = Int64GetDatumFast(tmp.temp_blks_written);
 		values[i++] = Float8GetDatumFast(tmp.blk_read_time);
 		values[i++] = Float8GetDatumFast(tmp.blk_write_time);
-		values[i++] = TimestampTzGetDatum(tmp.first_call);
-		values[i++] = TimestampTzGetDatum(tmp.last_call);
+
 
 		if (api_version >= PGSP_V1_7)
 		{
 			values[i++] = Float8GetDatumFast(tmp.temp_blk_read_time);
 			values[i++] = Float8GetDatumFast(tmp.temp_blk_write_time);
 		}
+
+		values[i++] = TimestampTzGetDatum(tmp.first_call);
+		values[i++] = TimestampTzGetDatum(tmp.last_call);
 
 		Assert(i == (api_version == PGSP_V1_5 ? PG_STORE_PLANS_COLS_V1_5 :
 					 api_version == PGSP_V1_6 ? PG_STORE_PLANS_COLS_V1_6 :
@@ -1767,7 +1765,7 @@ pg_store_plans_internal(FunctionCallInfo fcinfo,
 #if PG_VERSION_NUM < 170000
 	tuplestore_donestoring(tupstore);
 #else
-       tuplestore_rescan(tupstore);
+	tuplestore_rescan(tupstore);
 #endif
 }
 
