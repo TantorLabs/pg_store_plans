@@ -70,3 +70,8 @@ SELECT sum(p.calls) FROM pg_stat_statements s JOIN pg_store_plans p ON (s.queryi
 SET pg_store_plans.slow_statement_duration TO '1ms';
 SELECT 'sleep' as regress, pg_sleep(0.1);
 SELECT sum(p.calls) FROM pg_stat_statements s JOIN pg_store_plans p ON (s.queryid = p.queryid) JOIN pg_database d ON (d.oid = s.dbid) WHERE s.query = 'SELECT $1 as regress, pg_sleep($2)';
+
+-- Check, that last_call and first_call not like 2000-01-01 00:00:00+00
+SELECT COUNT(*) FROM pg_store_plans
+WHERE last_call = '2000-01-01 00:00:00+00'
+   OR first_call = '2000-01-01 00:00:00+00';
