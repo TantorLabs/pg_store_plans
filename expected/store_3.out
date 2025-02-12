@@ -164,3 +164,12 @@ SELECT sum(p.calls) FROM pg_stat_statements s JOIN pg_store_plans p ON (s.queryi
    2
 (1 row)
 
+-- Check, that last_call and first_call not like 2000-01-01 00:00:00+00
+SELECT COUNT(*) FROM pg_store_plans
+WHERE last_call = '2000-01-01 00:00:00+00'
+   OR first_call = '2000-01-01 00:00:00+00';
+ count 
+-------
+     0
+(1 row)
+
