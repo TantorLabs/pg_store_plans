@@ -1,0 +1,1176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<sect1 id="pg_store_plans">
+<title>pg_store_plans</title>
+
+    <sect2 id="pg_store_plans-about">
+    <title>About pg_store_plans</title>
+    <para>
+      Version: 1.8.1
+    </para>
+    <para>
+      <ulink url="https://github.com/TantorLabs/pg_store_plans">GitHub</ulink>
+    </para>
+    </sect2>
+
+    <sect2 id="pg_store_plans-descr">
+    <title>Description</title>
+    <para>
+        The <literal>pg_store_plans</literal> module provides a means for
+        tracking execution plan statistics of all SQL statements executed by
+        a server.
+    </para>
+
+    <para>
+        The module must be loaded by adding
+        <literal>pg_store_plans</literal> to
+        <link linkend="guc-shared-preload-libraries"><varname>shared_preload_libraries</varname></link>
+        in <literal>postgresql.conf</literal>, because it requires
+        additional shared memory. This means that a server restart is
+        required to add or remove the module.
+        <literal>pg_store_plans</literal> requires the GUC variable
+        <literal>compute_query_id</literal> to be "on" or
+        "auto". If it is set to "no",
+        <literal>pg_store_plans</literal> is silently disabled.
+    </para>
+    </sect2>
+
+<sect2 id="the-pg_store_plans-view">
+<title>The <literal>pg_store_plans</literal> View</title>
+<para>
+      The statistics gathered by the module are available via a system
+      view named <literal>pg_store_plans</literal>. This view contains
+      one row for each distinct set of database ID, user ID and query
+      ID. The columns of the view are described in
+      <literal>Table 1</literal>.
+</para>
+
+<para>
+<emphasis>Table 1. <literal>pg_store_plans</literal> Columns</emphasis>
+</para>
+
+
+<para>
+<table>
+  <title>
+    <emphasis role="strong">Table 1.
+    pg_store_plans</emphasis>
+  </title>
+  <tgroup cols="4">
+    <colspec colwidth="23*" align="left" />
+    <colspec colwidth="15*" align="left" />
+    <colspec colwidth="15*" align="left" />
+    <colspec colwidth="46*" align="left" />
+    <thead>
+      <row>
+        <entry>
+          <para>
+            Name
+          </para>
+        </entry>
+        <entry>
+          <para>
+            Type
+          </para>
+        </entry>
+        <entry>
+          <para>
+            References
+          </para>
+        </entry>
+        <entry>
+          <para>
+            Description
+          </para>
+        </entry>
+      </row>
+    </thead>
+    <tbody>
+      <row>
+        <entry>
+          <para>
+            userid
+          </para>
+        </entry>
+        <entry>
+          <para>
+            oid
+          </para>
+        </entry>
+        <entry>
+          <para>
+            pg_authid.oid
+          </para>
+        </entry>
+        <entry>
+          <para>
+            OID of user who executed the statement
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            dbid
+          </para>
+        </entry>
+        <entry>
+          <para>
+            oid
+          </para>
+        </entry>
+        <entry>
+          <para>
+            pg_database.oid
+          </para>
+        </entry>
+        <entry>
+          <para>
+            OID of database in which the statement was executed
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            queryid
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Core-generated query ID. If compute_query_id is set to “no”,
+            pg_store_plan is silently disabled. This is usable as the
+            join key with pg_stat_statements.
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            planid
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Plan hash code, computed from the normalized plan
+            representation.
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            plan
+          </para>
+        </entry>
+        <entry>
+          <para>
+            text
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Text of a representative plan. The format is specified by
+            the configuration parameter pg_store_plans.plan_format.
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            calls
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Number of times executed
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            total_time
+          </para>
+        </entry>
+        <entry>
+          <para>
+            double precision
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total time spent in the statement using the plan, in
+            milliseconds
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            rows
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total number of rows retrieved or affected by the statement
+            using the plan
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            shared_blks_hit
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total number of shared block cache hits by the statement
+            using the plan
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            shared_blks_read
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total number of shared blocks read by the statement using
+            the plan
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            shared_blks_dirtied
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total number of shared blocks dirtied by the statement using
+            the plan
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            shared_blks_written
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total number of shared blocks written by the statement using
+            the plan
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            local_blks_hit
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total number of local block cache hits by the statement
+            using the plan
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            local_blks_read
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total number of local blocks read by the statement using the
+            plan
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            local_blks_dirtied
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total number of local blocks dirtied by the statement using
+            the plan
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            local_blks_written
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total number of local blocks written by the statement using
+            the plan
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            temp_blks_read
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total number of temp blocks read by the statement using the
+            plan
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            temp_blks_written
+          </para>
+        </entry>
+        <entry>
+          <para>
+            bigint
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total number of temp blocks written by the statement using
+            the plan
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            blk_read_time
+          </para>
+        </entry>
+        <entry>
+          <para>
+            double precision
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total time the statement using the plan spent reading
+            blocks, in milliseconds (if track_io_timing is enabled,
+            otherwise zero)
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            blk_write_time
+          </para>
+        </entry>
+        <entry>
+          <para>
+            double precision
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total time the statement using the plan spent writing
+            blocks, in milliseconds (if track_io_timing is enabled,
+            otherwise zero)
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            temp_blk_read_time
+          </para>
+        </entry>
+        <entry>
+          <para>
+            double precision
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total time the statement using the plan spent reading
+            temporary file blocks, in milliseconds (if track_io_timing
+            is enabled, otherwise zero)
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            temp_blk_write_time
+          </para>
+        </entry>
+        <entry>
+          <para>
+            double precision
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Total time the statement using the plan spent writing
+            temporary file blocks, in milliseconds (if track_io_timing
+            is enabled, otherwise zero)
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            first_call
+          </para>
+        </entry>
+        <entry>
+          <para>
+            timestamp with time zone
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Timestamp for the least recently call of the query using
+            this plan.
+          </para>
+        </entry>
+      </row>
+      <row>
+        <entry>
+          <para>
+            last_call
+          </para>
+        </entry>
+        <entry>
+          <para>
+            timestamp with time zone
+          </para>
+        </entry>
+        <entry>
+        </entry>
+        <entry>
+          <para>
+            Timestamp for the most recently call of the query using this
+            plan.
+          </para>
+        </entry>
+      </row>
+    </tbody>
+  </tgroup>
+</table> 
+</para>
+
+
+<para>
+  This view, and the functions
+  <literal>pg_store_plans_reset</literal> and
+  <literal>pg_store_plans</literal> and other auxiliary functions, are
+  available only in databases where the
+  <literal>pg_store_plans</literal> is installed by
+  <literal>CREATE EXTENSION</literal>. However, statistics are tracked
+  across all databases of the server whenever the
+  <literal>pg_store_plans</literal> module is loaded onto the server,
+  regardless of presence of the view.
+</para>
+<para>
+  For security reasons, non-superusers are not allowed to see the plan
+  representation, queryid or planid for the queries executed by other
+  users.
+</para>
+<para>
+<literal>queryid</literal> is calculated to identify the source query
+  similary to <literal>pg_stat_statements</literal> but in a different
+  algorithm. <literal>plan</literal> is calculated in a similar way. Two
+  plans are considered the same if they are seemingly equivalent except
+  for the values of literal constants or fluctuating values such like
+  costs or measured time.
+</para>
+<para>
+  For PostgreSQL 14 or later, you can find the corresponding query for a
+  <literal>pg_store_plans</literal> entry in
+  <literal>pg_stat_statements</literal> by joining using
+  <literal>queryid</literal>, like the following.
+</para>
+<programlisting>
+SELECT s.query, p.plan FROM pg_store_plans p JOIN pg_stat_statements s USING (queryid);
+</programlisting>
+<para>
+  Plan ID is calculated excluding fluctuating properties of plans. On
+  the other hand, the <literal>pg_store_plans.plan</literal> view keeps
+  showing the most recent values for those fluctuating properties.
+</para>
+<para>
+<literal>pg_store_plans</literal> and
+  <literal>pg_stat_statements</literal> maintain thier entries
+  individually so there is certain unavoidable chance especially for
+  entries with low execution frequency that no correspondent is found.
+</para>
+
+
+</sect2>
+
+
+<sect2 id="the-pg_store_plans-view-1">
+<title>The <literal>pg_store_plans</literal> View</title>
+<para>
+    The statistics of <literal>pg_store_plans</literal> module itself
+    are tracked and made available via a view named
+    <literal>pg_store_plans_info</literal>. This view contains only a
+    single row. The columns of the view are shown in
+    <literal>Table 2</literal>.
+  </para>
+
+<para>
+<emphasis>Table 2.
+    <literal>pg_store_plans_info</literal> Columns</emphasis>
+</para>
+<informaltable>
+<tgroup cols="4">
+<colspec align="left"/>
+<colspec align="left"/>
+<colspec align="left"/>
+<colspec align="left"/>
+<thead>
+<row>
+<entry>
+            Name
+          </entry>
+<entry>
+            Type
+          </entry>
+<entry>
+            References
+          </entry>
+<entry>
+            Description
+          </entry>
+</row>
+</thead>
+<tbody>
+<row>
+<entry>
+<literal>dealloc</literal>
+</entry>
+<entry>
+<literal>bigint</literal>
+</entry>
+<entry>
+</entry>
+<entry>
+            Total number of times pg_store_plans entries about the
+            least-executed statements were deallocated because more
+            distinct statements than pg_store_plans.max were observed.
+          </entry>
+</row>
+<row>
+<entry>
+<literal>stats_reset</literal>
+</entry>
+<entry>
+<literal>timestamp with time zone</literal>
+</entry>
+<entry>
+</entry>
+<entry>
+            Time at which all statistics in the pg_store_plans view were
+            last reset.
+          </entry>
+</row>
+</tbody>
+</tgroup>
+</informaltable>
+</sect2>
+
+<sect2 id="pg_store_plans-functions">
+<title>Functions</title>
+<variablelist>
+<varlistentry>
+<term>
+<literal>pg_store_plans_reset() returns void</literal>
+</term>
+<listitem>
+<para>
+<literal>pg_store_plans_reset</literal> discards all
+          statistics gathered so far by
+          <literal>pg_store_plans</literal>. By default, only superusers
+          can execute this function.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans(showtext boolean) returns setof record</literal>
+</term>
+<listitem>
+<para>
+          The <literal>pg_store_plans</literal> view is defined in terms
+          of a function also named <literal>pg_store_plans</literal>.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans_info() returns record</literal>
+</term>
+<listitem>
+<para>
+<literal>pg_store_plans_info</literal> view is defined in
+          terms of a function also named
+          <literal>pg_store_plans_info</literal>.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_hash_query(query text) returns oid</literal>
+</term>
+<listitem>
+<para>
+          This function calculates hash value of a query text. The same
+          algorithm is used to calculate <literal>queryid</literal> in
+          <literal>pg_store_plans</literal> so this function is usable
+          to join with <literal>pg_store_plans</literal>.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans_textplan(query text) returns text</literal>
+</term>
+<listitem>
+<para>
+          This function generates a ordinary text representation from
+          raw representation of <literal>plan</literal> in
+          <literal>pg_store_plans</literal>, which is shown there when
+          <literal>pg_store_plans.plan_formats</literal> = 'raw'. Since
+          the result plan text is generated from json representation, it
+          might be slightly different from what you will get directly
+          from 'EXPLAIN' commnand.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans_jsonplan(query text) returns text</literal>
+</term>
+<listitem>
+<para>
+          This function infaltes a "short format json plan" or
+          "raw format" into normal json format. Short format
+          json is internal format for <literal>plan</literal> in
+          <literal>pg_store_plans</literal>, which is shown there when
+          <literal>pg_store_plans.plan_formats</literal> = 'raw'.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans_xmlplan(query text) returns text</literal>
+</term>
+<listitem>
+<para>
+          This function generates a XML representation from raw
+          representation of <literal>plan</literal> in
+          <literal>pg_store_plans</literal>, which is shown there when
+          <literal>pg_store_plans.plan_formats</literal> = 'raw'.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans_yamlplan(query text) returns text</literal>
+</term>
+<listitem>
+<para>
+          This function generates a YAML representation from raw
+          representation of <literal>plan</literal> in
+          <literal>pg_store_plans</literal>, which is shown there when
+          <literal>pg_store_plans.plan_formats</literal> = 'raw'.
+        </para>
+</listitem>
+</varlistentry>
+</variablelist>
+</sect2>
+
+<sect2 id="pg_store_plans-configuration-parameters">
+<title>Configuration Parameters</title>
+<variablelist>
+<varlistentry>
+<term>
+<literal>pg_store_plans.max</literal>
+        (<literal>integer</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.max</literal> is the maximum number of
+          plans tracked by the module (i.e., the maximum number of rows
+          in the <literal>pg_store_plans</literal> view). If more
+          distinct plans than that are observed, information about the
+          least-executed plan is discarded. The default value is 1000.
+          This parameter can only be set at server start.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans.track</literal>
+        (<literal>enum</literal>)
+      </term>
+<listitem>
+<para>
+          Similarly to <literal>pg_stat_statements</literal>,
+          <literal>pg_store_plans.track</literal> controls which
+          statements are counted by the module. Specify
+          <literal>top</literal> to track top-level statements (those
+          issued directly by clients), <literal>all</literal> to also
+          track nested statements (such as statements invoked within
+          functions except for some commands, see below), or
+          <literal>none</literal> to disable statement statistics
+          collection. The default value is <literal>top</literal>. When
+          <literal>all</literal> is specified, the commands executed
+          under <literal>CREATE EXTENSION</literal> and
+          <literal>ALTER EXTENSION</literal> commands are still ignored.
+          Specify <literal>verbose</literal> to track all commands
+          including ones excluded by <literal>all</literal>. Only
+          superusers can change this setting.
+        </para>
+<para>
+<literal>pg_store_plans.max_plan_length</literal> is the
+          maximum byte length of plans in the raw (shortened JSON)
+          format to store. The plan text is truncated at the length if
+          it is longer than that value. The default value is 5000. This
+          parameter can only be set at server start.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans.plan_storage</literal>
+        (<literal>integer</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.plan_storage</literal> specifies how
+          plan texts are stored while server is running. If it is set to
+          <literal>file</literal>, the plan texts are stored in a
+          temporary file as pg_stat_statements does.
+          <literal>shmem</literal> means to store plan texts on-memory.
+          The default value is "file".
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans.plan_format</literal>
+        (<literal>enum</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.plan_format</literal> controls the
+          format of <literal>plans</literal> in
+          <literal>pg_store_plans</literal>. <literal>text</literal> is
+          the default value and to show in ordinary text representation,
+          <literal>json</literal>, <literal>xml</literal> and
+          <literal>yaml</literal> to show in corresponding format.
+          <literal>raw</literal> to get internal representation which
+          can be fed to <literal>pg_store_plans_*plan</literal>
+          functions.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans.min_duration</literal>
+        (<literal>integer</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.min_duration</literal> is the minimum
+          statement execution time, in milliseconds, that will cause the
+          statement's plan to be logged. Setting this to zero (the
+          default) logs all plans. Only superuses can change this
+          setting.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans.log_analyze</literal>
+        (<literal>boolean</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.log_analyze</literal> causes
+          <literal>EXPLAIN ANALYZE</literal> output, rather than just
+          <literal>EXPLAIN</literal> output, to be included in
+          <literal>plan</literal>. This parameter is off by default.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans.log_buffers</literal>
+        (<literal>boolean</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.log_buffers</literal> causes
+          <literal>EXPLAIN (ANALYZE, BUFFERS)</literal> output, rather
+          than just <literal>EXPLAIN</literal> output, to be included in
+          <literal>plan</literal>. This parameter is off by default.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans.log_timing</literal>
+        (<literal>boolean</literal>)
+      </term>
+<listitem>
+<para>
+          Setting <literal>pg_store_plans.log_timing</literal> to false
+          disables to record actual timings. The overhead of repeatedly
+          reading the system clock can slow down the query significantly
+          on some systems, so it may be useful to set this parameter to
+          FALSE when only actual row counts, and not exact execution
+          times for each execution nodes, are needed. Run time of the
+          entire statement is always measured when
+          <literal>pg_store_plans.log_analyze</literal> is TRUE. It
+          defaults to TRUE.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans.log_triggers</literal>
+        (<literal>boolean</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.log_triggers</literal> causes trigger
+          execution statistics to be included in recoreded plans. This
+          parameter has no effect unless
+          <literal>pg_store_plans.log_analyze</literal> is turned on.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans.verbose</literal>
+        (<literal>boolean</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.verbose</literal> causes
+          <literal>EXPLAIN VERBOSE</literal> output, rather than just
+          <literal>EXPLAIN</literal> output, to be included in
+          <literal>plan</literal>. This parameter is off by default.
+        </para>
+</listitem>
+</varlistentry>
+<varlistentry>
+<term>
+<literal>pg_store_plans.save</literal>
+        (<literal>boolean</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.save</literal> specifies whether to
+          save plan statistics across server shutdowns. If it is
+          <literal>off</literal> then statistics are not saved at
+          shutdown nor reloaded at server start. The default value is
+          <literal>on</literal>. This parameter can only be set in the
+          <literal>postgresql.conf</literal> file or on the server
+          command line.
+        </para>
+</listitem>
+</varlistentry>
+
+<varlistentry>
+<term>
+<literal>pg_store_plans.store_last_plan</literal>
+        (<literal>boolean</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.store_last_plan</literal> specifies whether tha text of plan should always be updated.
+Default is <literal>false</literal>.
+        </para>
+</listitem>
+</varlistentry>
+
+
+<varlistentry>
+<term>
+<literal>pg_store_plans.sample_rate</literal>
+        (<literal>float</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.sample_rate</literal> specifies fraction of queries to process.
+Under high loads, it allows to reduce the impact of <literal>pg_store_plans</literal> on performance.
+Default is <literal>0.0</literal>.
+</para>
+</listitem>
+</varlistentry>
+
+
+<varlistentry>
+<term>
+<literal>pg_store_plans.slow_statement_duration</literal>
+        (<literal>integer</literal>)
+      </term>
+<listitem>
+<para>
+<literal>pg_store_plans.slow_statement_duration</literal> specifies unconditional record plan of slow statement.
+Default is <literal>0</literal>.
+</para>
+</listitem>
+</varlistentry>
+
+
+</variablelist>
+</sect2>
+
+<sect2 id="pg_store_plans-discussion-on-plan_storage-setting">
+<title>Discussion on plan_storage
+  setting</title>
+<para>
+<literal>pg_store_plans</literal> claims additional shared memory
+    proportional to <literal>pg_store_plans.max</literal>. When
+    <literal>pg_store_plans.plan_storage</literal> is set to
+    "shmem", it claims further additional shared memory to
+    store plan texts in an amount of the product of the maximum number
+    of plans to store (pg_store_plans.max) and the maximum length of
+    individual plan (pg_store_plans.max_plan_length). If
+    <literal>pg_store_plans.plan_storage</literal> is set to
+    "file", plan texts are written to a temporary file as
+    <literal>pg_stat_statements</literal> does. If
+    <literal>pg_store_plans.max</literal> is not large enough to store
+    all plans, <literal>pg_store_plans</literal> reclaims the space for
+    new plans by evicting some portion of the entries. After several
+    rounds of that eviction, <literal>pg_store_plans</literal> runs
+    garbage collection on the temporary file, which might be painful for
+    certain workloads. You can see how frequntly that eviction happens
+    in <literal>pg_store_plans_info.dealloc</literal>.
+  </para>
+<para>
+    If pg_store_plans.max is sufficiently large so that garbage
+    collection doesn't happen, "file" is recommended as
+    <literal>pg_store_plans.plan_storage</literal>.
+  </para>
+<para>
+    These parameters must be set in <literal>postgresql.conf</literal>.
+    An example setting follows:
+  </para>
+<programlisting>
+# postgresql.conf
+shared_preload_libraries = 'pg_store_plans, pg_stat_statements'
+pg_store_plans.max = 10000
+pg_store_plans.track = all
+</programlisting>
+</sect2>
+
+<sect2 id="pg_store_plans-sample-output">
+<title>Sample Output</title>
+<programlisting>
+(postgresql.conf has following settings)
+shared_preload_libraries = 'pg_store_plans,pg_stat_statements'
+pg_store_plans.log_analyze = true
+pg_store_plans.log_timing = false
+
+bench=# SELECT pg_store_plans_reset();
+
+$ pgbench -i bench
+$ pgbench -c10 -t1000 bench
+
+bench=# \x
+bench=#  SELECT s.query, p.plan,
+        p.calls as "plan calls", s.calls as "stmt calls",
+        p.total_time / p.calls as "time/call", p.first_call, p.last_call
+        FROM pg_stat_statements s
+        JOIN pg_store_plans p USING (queryid) WHERE p.calls &lt; s.calls
+        ORDER BY query ASC, "time/call" DESC;
+-[ RECORD 1 ]-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+query      | UPDATE pgbench_tellers SET tbalance = tbalance + $1 WHERE tid = $2
+plan       | Update on pgbench_tellers  (cost=0.00..7.88 rows=0 width=0)                                                                                                                                                                                                            +
+           |   -&gt;  Seq Scan on pgbench_tellers  (cost=0.00..7.88 rows=1 width=10)                                                                                                                                                                                                   +
+           |         Filter: (tid = 1)
+plan calls | 396
+stmt calls | 10000
+time/call  | 16.15434492676767
+first_call | 2021-11-25 15:11:38.258838+09
+last_call  | 2021-11-25 15:11:40.170291+09
+-[ RECORD 2 ]-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+query      | UPDATE pgbench_tellers SET tbalance = tbalance + $1 WHERE tid = $2
+plan       | Update on pgbench_tellers  (cost=0.14..8.15 rows=0 width=0)                                                                                                                                                                                                            +
+           |   -&gt;  Index Scan using pgbench_tellers_pkey on pgbench_tellers  (cost=0.14..8.15 rows=1 width=10)                                                                                                                                                                      +
+           |         Index Cond: (tid = 8)                                                                                                                                                                                                                                          +
+plan calls | 9604
+stmt calls | 10000
+time/call  | 10.287281695439345
+first_call | 2021-11-25 15:11:40.161556+09
+last_call  | 2021-11-25 15:12:09.957773+09
+-[ RECORD 3 ]-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+query      | select s.query, p.plan, p.calls as "plan calls", s.calls as "stmt calls", p.total_time / p.calls as "time/call", p.first_call, p.last_call from pg_stat_statements s join pg_store_plans p using (queryid) where p.calls &lt; s.calls order by query asc, "time/call" desc
+plan       | Sort  (cost=309.71..313.88 rows=1667 width=104)                                                                                                                                                                                                                        +
+           |   Sort Key: pg_stat_statements.query, ((pg_store_plans.total_time / (pg_store_plans.calls)::double precision)) DESC                                                                                                                                                    +
+           |   -&gt;  Merge Join  (cost=119.66..220.50 rows=1667 width=104)                                                                                                                                                                                                            +
+           |         Merge Cond: (pg_stat_statements.queryid = pg_store_plans.queryid)                                                                                                                                                                                              +
+           |         Join Filter: (pg_store_plans.calls &lt; pg_stat_statements.calls)                                                                                                                                                                                                 +
+           |         -&gt;  Sort  (cost=59.83..62.33 rows=1000 width=48)                                                                                                                                                                                                               +
+           |               Sort Key: pg_stat_statements.queryid                                                                                                                                                                                                                     +
+           |               -&gt;  Function Scan on pg_stat_statements  (cost=0.00..10.00 rows=1000 width=48)                                                                                                                                                                           +
+           |         -&gt;  Sort  (cost=59.83..62.33 rows=1000 width=72)                                                                                                                                                                                                               +
+           |               Sort Key: pg_store_plans.queryid                                                                                                                                                                                                                         +
+           |               -&gt;  Function Scan on pg_store_plans  (cost=0.00..10.00 rows=1000 width=72)                                                                                                                                                                               +
+plan calls | 3
+stmt calls | 4
+time/call  | 16.387161
+first_call | 2021-11-25 15:20:57.978082+09
+last_call  | 2021-11-25 15:23:48.631993+09
+-[ RECORD 4 ]-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+query      | select s.query, p.plan, p.calls as "plan calls", s.calls as "stmt calls", p.total_time / p.calls as "time/call", p.first_call, p.last_call from pg_stat_statements s join pg_store_plans p using (queryid) where p.calls &lt; s.calls order by query asc, "time/call" desc
+plan       | Sort  (cost=309.71..313.88 rows=1667 width=104)                                                                                                                                                                                                                        +
+           |   Sort Key: pg_stat_statements.query, ((pg_store_plans.total_time / (pg_store_plans.calls)::double precision)) DESC                                                                                                                                                    +
+           |   Sort Method: quicksort  Memory: 26kB                                                                                                                                                                                                                                 +
+           |   -&gt;  Merge Join  (cost=119.66..220.50 rows=1667 width=104)                                                                                                                                                                                                            +
+           |         Merge Cond: (pg_stat_statements.queryid = pg_store_plans.queryid)                                                                                                                                                                                              +
+           |         Join Filter: (pg_store_plans.calls &lt; pg_stat_statements.calls)                                                                                                                                                                                                 +
+           |         Rows Removed by Join Filter: 7                                                                                                                                                                                                                                 +
+           |         -&gt;  Sort  (cost=59.83..62.33 rows=1000 width=48)                                                                                                                                                                                                               +
+           |               Sort Key: pg_stat_statements.queryid                                                                                                                                                                                                                     +
+           |               Sort Method: quicksort  Memory: 27kB                                                                                                                                                                                                                     +
+           |               -&gt;  Function Scan on pg_stat_statements  (cost=0.00..10.00 rows=1000 width=48)                                                                                                                                                                           +
+           |         -&gt;  Sort  (cost=59.83..62.33 rows=1000 width=72)                                                                                                                                                                                                               +
+           |               Sort Key: pg_store_plans.queryid                                                                                                                                                                                                                         +
+           |               Sort Method: quicksort  Memory: 30kB                                                                                                                                                                                                                     +
+           |               -&gt;  Function Scan on pg_store_plans  (cost=0.00..10.00 rows=1000 width=72)                                                                                                                                                                               +
+plan calls | 1
+stmt calls | 4
+time/call  | 4.46928
+first_call | 2021-11-25 15:12:27.142535+09
+last_call  | 2021-11-25 15:12:27.142536+09
+
+postgres=#
+</programlisting>
+</sect2>
+</sect1>

@@ -22,8 +22,8 @@
  * them of the latest execution. Entry eviction is done in the same
  * way to pg_stat_statements.
  *
- * Copyright (c) 2008-2020, PostgreSQL Global Development Group
- * Copyright (c) 2012-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ * Copyright (c) 2008-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2025, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  *
  * IDENTIFICATION
  *	  pg_store_plans/pg_store_plans.c
@@ -39,7 +39,11 @@
 
 #include "catalog/pg_authid.h"
 #include "commands/explain.h"
-#if PG_VERSION_NUM >= 150000
+#if PG_VERSION_NUM >= 180000
+#include "commands/explain_format.h"
+#include "commands/explain_state.h"
+#endif
+#if PG_VERSION_NUM >= 150000 && PG_VERSION_NUM <= 170000
 #include "common/pg_prng.h"
 #endif
 #include "access/hash.h"
@@ -59,11 +63,10 @@
 #include "tcop/utility.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
-#if PG_VERSION_NUM >= 140000 && PG_VERSION_NUM < 160000 
-#include "utils/queryjumble.h"
-#endif
 #if PG_VERSION_NUM >= 160000
 #include "nodes/queryjumble.h"
+#elif PG_VERSION_NUM >= 140000
+#include "utils/queryjumble.h"
 #endif
 #include "utils/timestamp.h"
 #if PG_VERSION_NUM <= 110000
@@ -83,7 +86,7 @@ PG_MODULE_MAGIC;
 static const uint32 PGSP_PG_MAJOR_VERSION = PG_VERSION_NUM / 100;
 
 /* This constant defines the magic number in the stats file header */
-static const uint32 PGSP_FILE_HEADER = 0x20211125;
+static const uint32 PGSP_FILE_HEADER = 0x20221214;
 static int max_plan_len = 5000;
 
 /* XXX: Should USAGE_EXEC reflect execution time and/or buffer usage? */
@@ -104,10 +107,6 @@ typedef uint32 queryid_t;
 #define PGSP_NO_QUERYID		0
 #endif
 
-#if PG_VERSION_NUM <= 120000
-#define pg_pwrite pwrite
-#endif
-
 /*
  * Extension version number, for supporting older extension versions' objects
  */
@@ -115,7 +114,9 @@ typedef enum pgspVersion
 {
 	PGSP_V1_5 = 0,
 	PGSP_V1_6,
-	PGSP_V1_7
+	PGSP_V1_7,
+	/* PGSP_V1_7 interface is used for v1.8 */
+	PGSP_V1_9
 } pgspVersion;
 
 /*
@@ -156,10 +157,23 @@ typedef struct Counters
 	int64		local_blks_written;	/* # of local disk blocks written */
 	int64		temp_blks_read; 	/* # of temp blocks read */
 	int64		temp_blks_written;	/* # of temp blocks written */
+#if PG_VERSION_NUM >= 170000
+	double		shared_blk_read_time;	/* time spent reading shared bloks,
+										   in msec */
+	double		shared_blk_write_time; 	/* time spent writing shared blocks,
+										   in msec */
+	double		local_blk_read_time;	/* time spent reading local blocks,
+										   in msec */
+	double		local_blk_write_time; 	/* time spent writing local blocks,
+										   in msec */
+#else
 	double		blk_read_time;		/* time spent reading, in msec */
 	double		blk_write_time; 	/* time spent writing, in msec */
-	double		temp_blk_read_time;	/* time spent reading temp blocks, in msec */
-	double		temp_blk_write_time;/* time spent writing temp blocks, in msec */
+#endif
+	double		temp_blk_read_time;	/* time spent reading temp blocks,
+									   in msec */
+	double		temp_blk_write_time;/* time spent writing temp blocks,
+									   in msec */
 	TimestampTz	first_call;			/* timestamp of first call  */
 	TimestampTz	last_call;			/* timestamp of last call  */
 	double		usage;				/* usage factor */
@@ -277,22 +291,16 @@ static const struct config_enum_entry plan_storage_options[] =
 static int	store_size;			/* max # statements to track */
 static int	track_level = TRACK_LEVEL_TOP;		/* tracking level */
 static int	min_duration;		/* min duration to record */
-static int	slow_statement_duration;	/* slow log to record */
 static bool dump_on_shutdown;	/* whether to save stats across shutdown */
 static bool log_analyze;		/* Similar to EXPLAIN (ANALYZE *) */
 static bool log_verbose;		/* Similar to EXPLAIN (VERBOSE *) */
 static bool log_buffers;		/* Similar to EXPLAIN (BUFFERS *) */
 static bool log_timing;			/* Similar to EXPLAIN (TIMING *) */
 static bool log_triggers;		/* whether to log trigger statistics  */
-static bool store_last_plan;    /* always update plan */
-static double sample_rate = 1;  /* sample rate */
-static int  plan_format = PLAN_FORMAT_TEXT;		/* Plan representation style in
+static int  plan_format= PLAN_FORMAT_TEXT;		/* Plan representation style in
 								 * pg_store_plans.plan  */
-static int  plan_storage = PLAN_STORAGE_FILE;		/* Plan storage type */
+static int  plan_storage = PLAN_STORAGE_FILE;	/* Plan storage type */
 
-
-/* Is the current top-level query to be sampled? */
-static bool current_query_sampled = false;
 
 /* disables tracking overriding track_level */
 static bool force_disabled = false;
@@ -308,8 +316,7 @@ static bool force_disabled = false;
 	(!force_disabled &&											  \
 	 (track_level >= TRACK_LEVEL_ALL ||							  \
 	  (track_level == TRACK_LEVEL_TOP && nested_level == 0)) &&	  \
-	 (q != PGSP_NO_QUERYID) && \
-	 current_query_sampled)
+	 (q != PGSP_NO_QUERYID))
 #else
 #define pgsp_enabled(q) \
 	(!force_disabled &&											\
@@ -340,6 +347,7 @@ PG_FUNCTION_INFO_V1(pg_store_plans_hash_query);
 PG_FUNCTION_INFO_V1(pg_store_plans);
 PG_FUNCTION_INFO_V1(pg_store_plans_1_6);
 PG_FUNCTION_INFO_V1(pg_store_plans_1_7);
+PG_FUNCTION_INFO_V1(pg_store_plans_1_9);
 PG_FUNCTION_INFO_V1(pg_store_plans_shorten);
 PG_FUNCTION_INFO_V1(pg_store_plans_normalize);
 PG_FUNCTION_INFO_V1(pg_store_plans_jsonplan);
@@ -368,7 +376,7 @@ static void pgsp_shmem_shutdown(int code, Datum arg);
 static void pgsp_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgsp_ExecutorRun(QueryDesc *queryDesc,
 				 ScanDirection direction,
-							 uint64 count, bool execute_once);
+							 uint64 count);
 static void pgsp_ExecutorFinish(QueryDesc *queryDesc);
 static void pgsp_ExecutorEnd(QueryDesc *queryDesc);
 static void pgsp_ProcessUtility(PlannedStmt *pstmt, const char *queryString,
@@ -413,7 +421,6 @@ _PG_init(void)
 	 */
 	if (!process_shared_preload_libraries_in_progress)
 		return;
-
 #if PG_VERSION_NUM >= 140000
 	/*
 	 * Inform the postmaster that we want to enable query_id calculation if
@@ -495,20 +502,7 @@ _PG_init(void)
 							0,
 							INT_MAX,
 							PGC_SUSET,
-							GUC_UNIT_MS,
-							NULL,
-							NULL,
-							NULL);
-
-	DefineCustomIntVariable("pg_store_plans.slow_statement_duration",
-					"Unconditional record plan of slow statement.",
-							NULL,
-							&slow_statement_duration,
 							0,
-							0,
-							INT_MAX,
-							PGC_SUSET,
-							GUC_UNIT_MS,
 							NULL,
 							NULL,
 							NULL);
@@ -518,17 +512,6 @@ _PG_init(void)
 							 NULL,
 							 &dump_on_shutdown,
 							 true,
-							 PGC_SIGHUP,
-							 0,
-							 NULL,
-							 NULL,
-							 NULL);
-
-	DefineCustomBoolVariable("pg_store_plans.store_last_plan",
-			   "Always update text of stored plan.",
-							 NULL,
-							 &store_last_plan,
-							 false,
 							 PGC_SIGHUP,
 							 0,
 							 NULL,
@@ -584,19 +567,6 @@ _PG_init(void)
 							 NULL,
 							 &log_verbose,
 							 false,
-							 PGC_SUSET,
-							 0,
-							 NULL,
-							 NULL,
-							 NULL);
-
-	DefineCustomRealVariable("pg_store_plans.sample_rate",
-                          "Fraction of queries to process.",
-							 NULL,
-							 &sample_rate,
-							 1.0,
-							 0.0,
-							 1.0,
 							 PGC_SUSET,
 							 0,
 							 NULL,
@@ -907,7 +877,7 @@ fail:
 static void
 pgsp_shmem_shutdown(int code, Datum arg)
 {
-	FILE	   *file = NULL;
+	FILE	   *file;
 	char	   *pbuffer = NULL;
 	Size		pbuffer_size = 0;
 	HASH_SEQ_STATUS hash_seq;
@@ -969,9 +939,6 @@ pgsp_shmem_shutdown(int code, Datum arg)
 		}
 	}
 
-	free(pbuffer);
-	pbuffer = NULL;
-
 	if (FreeFile(file))
 	{
 		file = NULL;
@@ -997,7 +964,6 @@ error:
 			(errcode_for_file_access(),
 			 errmsg("could not write pg_store_plans file \"%s\": %m",
 					PGSP_DUMP_FILE ".tmp")));
-	free(pbuffer);
 	if (file)
 		FreeFile(file);
 	unlink(PGSP_DUMP_FILE ".tmp");
@@ -1018,13 +984,6 @@ pgsp_ExecutorStart(QueryDesc *queryDesc, int eflags)
 			(log_timing ? 0: INSTRUMENT_ROWS)|
 			(log_buffers ? INSTRUMENT_BUFFERS : 0);
 	}
-
-#if PG_VERSION_NUM >= 150000
-	current_query_sampled = (pg_prng_double(&pg_global_prng_state) <
-									sample_rate);
-#else
-	current_query_sampled = (random() < (sample_rate *((double) MAX_RANDOM_VALUE + 1)));
-#endif
 
 	if (prev_ExecutorStart)
 		prev_ExecutorStart(queryDesc, eflags);
@@ -1055,16 +1014,15 @@ pgsp_ExecutorStart(QueryDesc *queryDesc, int eflags)
  * ExecutorRun hook: all we need do is track nesting depth
  */
 static void
-pgsp_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count,
-				 bool execute_once)
+pgsp_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count)
 {
 	nested_level++;
 	PG_TRY();
 	{
 		if (prev_ExecutorRun)
-			prev_ExecutorRun(queryDesc, direction, count, execute_once);
+			prev_ExecutorRun(queryDesc, direction, count);
 		else
-			standard_ExecutorRun(queryDesc, direction, count, execute_once);
+			standard_ExecutorRun(queryDesc, direction, count);
 		nested_level--;
 	}
 	PG_CATCH();
@@ -1112,12 +1070,10 @@ pgsp_ExecutorEnd(QueryDesc *queryDesc)
 		 */
 		InstrEndLoop(queryDesc->totaltime);
 
-		if ((pgsp_enabled(queryDesc->plannedstmt->queryId) &&
+		if (pgsp_enabled(queryDesc->plannedstmt->queryId) &&
 			queryDesc->totaltime->total &&
 			queryDesc->totaltime->total >=
-			(double)min_duration / 1000.0) ||
-            (slow_statement_duration > 0 && nested_level == 0 && queryDesc->totaltime &&
-                queryDesc->totaltime->total >= (double)slow_statement_duration / 1000.0))
+			(double)min_duration / 1000.0)
 		{
 			queryid_t	  queryid;
 			ExplainState *es;
@@ -1156,9 +1112,8 @@ pgsp_ExecutorEnd(QueryDesc *queryDesc)
 			 * For pg14 and above, core postgres can compute a queryid so we
 			 * will rely on it.
 			 */
-			// if (queryid == PGSP_NO_QUERYID)
-			//	queryid = (queryid_t) hash_query(queryDesc->sourceText);
-			// Note: AB: disabled per vadv version
+			if (queryid == PGSP_NO_QUERYID)
+				queryid = (queryid_t) hash_query(queryDesc->sourceText);
 #else
 			Assert(queryid != PGSP_NO_QUERYID);
 #endif
@@ -1277,6 +1232,7 @@ pgsp_store(char *plan, queryid_t queryId,
 {
 	pgspHashKey key;
 	pgspEntry  *entry;
+	char	   *norm_query = NULL;
 	int 		plan_len;
 	char	   *normalized_plan = NULL;
 	char	   *shorten_plan = NULL;
@@ -1296,31 +1252,27 @@ pgsp_store(char *plan, queryid_t queryId,
 	key.queryid = queryId;
 
 	normalized_plan = pgsp_json_normalize(plan);
+	shorten_plan = pgsp_json_shorten(plan);
+	elog(DEBUG3, "pg_store_plans: Normalized plan: %s", normalized_plan);
+	elog(DEBUG3, "pg_store_plans: Shorten plan: %s", shorten_plan);
+	elog(DEBUG3, "pg_store_plans: Original plan: %s", plan);
+	plan_len = strlen(shorten_plan);
 
 	key.planid = hash_any((const unsigned char *)normalized_plan,
 						  strlen(normalized_plan));
+	pfree(normalized_plan);
+
+	if (plan_len >= shared_state->plan_size)
+		plan_len = pg_encoding_mbcliplen(GetDatabaseEncoding(),
+										 shorten_plan,
+										 plan_len,
+										 shared_state->plan_size - 1);
 
 
 	/* Look up the hash table entry with shared lock. */
 	LWLockAcquire(shared_state->lock, LW_SHARED);
 
 	entry = (pgspEntry *) hash_search(hash_table, &key, HASH_FIND, NULL);
-
-	if (!entry)
-	{
-		shorten_plan = pgsp_json_shorten(plan);
-		elog(DEBUG3, "pg_store_plans: Normalized plan: %s", normalized_plan);
-		elog(DEBUG3, "pg_store_plans: Shorten plan: %s", shorten_plan);
-		elog(DEBUG3, "pg_store_plans: Original plan: %s", plan);
-		plan_len = strlen(shorten_plan);
-
-		if (plan_len >= shared_state->plan_size)
-			plan_len = pg_encoding_mbcliplen(GetDatabaseEncoding(),
-											shorten_plan,
-											plan_len,
-											shared_state->plan_size - 1);
-	}
-	pfree(normalized_plan);
 
 	/* Store the plan text, if the entry not present */
 	if (!entry && plan_storage == PLAN_STORAGE_FILE)
@@ -1429,14 +1381,28 @@ pgsp_store(char *plan, queryid_t queryId,
 	e->counters.local_blks_written += bufusage->local_blks_written;
 	e->counters.temp_blks_read += bufusage->temp_blks_read;
 	e->counters.temp_blks_written += bufusage->temp_blks_written;
-#if PG_VERSION_NUM < 170000
-	e->counters.blk_read_time += INSTR_TIME_GET_MILLISEC(bufusage->blk_read_time);
-	e->counters.blk_write_time += INSTR_TIME_GET_MILLISEC(bufusage->blk_write_time);
+
+#if PG_VERSION_NUM >= 170000
+	e->counters.shared_blk_read_time +=
+		INSTR_TIME_GET_MILLISEC(bufusage->shared_blk_read_time);
+	e->counters.shared_blk_write_time +=
+		INSTR_TIME_GET_MILLISEC(bufusage->shared_blk_write_time);
+	e->counters.local_blk_read_time +=
+		INSTR_TIME_GET_MILLISEC(bufusage->local_blk_read_time);
+	e->counters.local_blk_write_time +=
+		INSTR_TIME_GET_MILLISEC(bufusage->local_blk_write_time);
+#else
+	e->counters.blk_read_time +=
+		INSTR_TIME_GET_MILLISEC(bufusage->blk_read_time);
+	e->counters.blk_write_time +=
+		INSTR_TIME_GET_MILLISEC(bufusage->blk_write_time);
 #endif
+
 #if PG_VERSION_NUM >= 150000
 	e->counters.temp_blk_read_time += INSTR_TIME_GET_MILLISEC(bufusage->temp_blk_read_time);
 	e->counters.temp_blk_write_time += INSTR_TIME_GET_MILLISEC(bufusage->temp_blk_write_time);
 #endif
+
 	e->counters.last_call = GetCurrentTimestamp();
 	e->counters.usage += USAGE_EXEC(total_time);
 
@@ -1444,6 +1410,10 @@ pgsp_store(char *plan, queryid_t queryId,
 
 done:
 	LWLockRelease(shared_state->lock);
+
+	/* We postpone this pfree until we're out of the lock */
+	if (norm_query)
+		pfree(norm_query);
 }
 
 /*
@@ -1464,11 +1434,20 @@ pg_store_plans_reset(PG_FUNCTION_ARGS)
 #define PG_STORE_PLANS_COLS_V1_5	27
 #define PG_STORE_PLANS_COLS_V1_6	26
 #define PG_STORE_PLANS_COLS_V1_7	28
-#define PG_STORE_PLANS_COLS		28	/* maximum of above */
+#define PG_STORE_PLANS_COLS_V1_9	30
+#define PG_STORE_PLANS_COLS			30	/* maximum of above */
 
 /*
  * Retrieve statement statistics.
  */
+Datum
+pg_store_plans_1_9(PG_FUNCTION_ARGS)
+{
+	pg_store_plans_internal(fcinfo, PGSP_V1_9);
+
+	return (Datum) 0;
+}
+
 Datum
 pg_store_plans_1_7(PG_FUNCTION_ARGS)
 {
@@ -1476,7 +1455,6 @@ pg_store_plans_1_7(PG_FUNCTION_ARGS)
 
 	return (Datum) 0;
 }
-
 
 Datum
 pg_store_plans_1_6(PG_FUNCTION_ARGS)
@@ -1613,7 +1591,6 @@ pg_store_plans_internal(FunctionCallInfo fcinfo,
 		Counters	tmp;
 		double		stddev;
 
-		memset(&tmp, 0, sizeof(Counters));
 		memset(values, 0, sizeof(values));
 		memset(nulls, 0, sizeof(nulls));
 
@@ -1736,9 +1713,14 @@ pg_store_plans_internal(FunctionCallInfo fcinfo,
 		values[i++] = Int64GetDatumFast(tmp.local_blks_written);
 		values[i++] = Int64GetDatumFast(tmp.temp_blks_read);
 		values[i++] = Int64GetDatumFast(tmp.temp_blks_written);
-		values[i++] = Float8GetDatumFast(tmp.blk_read_time);
-		values[i++] = Float8GetDatumFast(tmp.blk_write_time);
+		values[i++] = Float8GetDatumFast(tmp.shared_blk_read_time);
+		values[i++] = Float8GetDatumFast(tmp.shared_blk_write_time);
 
+		if (api_version >= PGSP_V1_9)
+		{
+			values[i++] = Float8GetDatumFast(tmp.local_blk_read_time);
+			values[i++] = Float8GetDatumFast(tmp.local_blk_write_time);
+		}
 
 		if (api_version >= PGSP_V1_7)
 		{
@@ -1752,6 +1734,7 @@ pg_store_plans_internal(FunctionCallInfo fcinfo,
 		Assert(i == (api_version == PGSP_V1_5 ? PG_STORE_PLANS_COLS_V1_5 :
 					 api_version == PGSP_V1_6 ? PG_STORE_PLANS_COLS_V1_6 :
 					 api_version == PGSP_V1_7 ? PG_STORE_PLANS_COLS_V1_7 :
+					 api_version == PGSP_V1_9 ? PG_STORE_PLANS_COLS_V1_9 :
 					 -1 /* fail if you forget to update this assert */ ));
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
@@ -1759,13 +1742,9 @@ pg_store_plans_internal(FunctionCallInfo fcinfo,
 
 	LWLockRelease(shared_state->lock);
 
-	free(pbuffer);
-
-	/* clean up and return the tuplestore */
 #if PG_VERSION_NUM < 170000
+	/* clean up and return the tuplestore */
 	tuplestore_donestoring(tupstore);
-#else
-	tuplestore_rescan(tupstore);
 #endif
 }
 
@@ -2074,7 +2053,7 @@ error:
 static char *
 ptext_load_file(Size *buffer_size)
 {
-	char	   *buf = NULL;
+	char	   *buf;
 	int			fd;
 	struct stat stat;
 	Size		nread;
@@ -2243,7 +2222,7 @@ need_gc_ptexts(void)
 static void
 gc_ptexts(void)
 {
-	char	   *pbuffer = NULL;
+	char	   *pbuffer;
 	Size		pbuffer_size;
 	FILE	   *pfile = NULL;
 	HASH_SEQ_STATUS hash_seq;
@@ -2409,7 +2388,7 @@ entry_reset(void)
 {
 	HASH_SEQ_STATUS hash_seq;
 	pgspEntry  *entry;
-	FILE	   *pfile = NULL;
+	FILE	   *pfile;
 
 	if (!shared_state || !hash_table)
 		ereport(ERROR,

@@ -1,7 +1,7 @@
 # pg_stat_plan/Makefile
 
 MODULES = pg_store_plans
-STOREPLANSVER = 1.8.1
+STOREPLANSVER = 1.9
 
 MODULE_big = pg_store_plans
 OBJS = pg_store_plans.o pgsp_json.o pgsp_json_text.o pgsp_explain.o
@@ -12,14 +12,15 @@ PG_VERSION := $(shell pg_config --version | sed "s/^PostgreSQL //" | sed "s/\.[0
 
 DATA = pg_store_plans--1.6.sql pg_store_plans--1.6--1.6.1.sql \
        pg_store_plans--1.6.1--1.6.2.sql pg_store_plans--1.6.2--1.6.3.sql \
-       pg_store_plans--1.6.3--1.6.4.sql pg_store_plans--1.6.4--1.8.sql pg_store_plans--1.8--1.8.1.sql
+       pg_store_plans--1.6.3--1.6.4.sql pg_store_plans--1.6.4--1.8.sql pg_store_plans--1.8--1.8.1.sql \
+	   pg_store_plans--1.8.1--1.9.sql
 
 REGRESS = convert store
 REGRESS_OPTS = --temp-config=regress.conf
 ifdef USE_PGXS
     PG_CONFIG = pg_config
     PG_MAJOR_VERSION := $(shell pg_config --version | awk '{print $$2}' | cut -d '.' -f1)
-    ifneq (,$(filter $(PG_MAJOR_VERSION),16 17))
+    ifneq (,$(filter $(PG_MAJOR_VERSION),16 17 18))
         ifeq ($(USE_PGXS),1)
             ifndef PATH_TO_SOURCE_CODE
                 $(error PATH_TO_SOURCE_CODE is not set for PostgreSQL $(PG_MAJOR_VERSION). Aborting build.)
@@ -36,29 +37,29 @@ else
     subdir = contrib/pg_store_plans
     top_builddir = ../..
     PG_MAJOR_VERSION := $(shell ../../configure --version | grep 'PostgreSQL configure' | awk '{print $$3}' | cut -d '.' -f1)
-    ifneq (,$(filter $(PG_MAJOR_VERSION),16 17))
+    ifneq (,$(filter $(PG_MAJOR_VERSION),16 17 18))
         PG_CPPFLAGS += -I"../../src/backend"
     endif
     include $(top_builddir)/src/Makefile.global
     include $(top_srcdir)/contrib/contrib-global.mk
 endif
 
-STARBALL14 = pg_store_plans14-$(STOREPLANSVER).tar.gz
-STARBALLS = $(STARBALL14)
+STARBALL17 = pg_store_plans17-$(STOREPLANSVER).tar.gz
+STARBALLS = $(STARBALL17)
 
 TARSOURCES = Makefile *.c  *.h \
 	pg_store_plans--*.sql \
 	pg_store_plans.control \
 	docs/* expected/*.out sql/*.sql \
 
-ifneq ($(shell uname), $(filter $(shell uname),SunOS Darwin))
+ifneq ($(shell uname), SunOS)
 LDFLAGS+=-Wl,--build-id
 endif
 
 ## These entries need running server
 DBNAME = postgres
 
-rpms: rpm14
+rpms: rpm17
 
 $(STARBALLS): $(TARSOURCES)
 	if [ -h $(subst .tar.gz,,$@) ]; then rm $(subst .tar.gz,,$@); fi
@@ -70,8 +71,8 @@ $(STARBALLS): $(TARSOURCES)
 	tar -chzf $@ $(addprefix $(subst .tar.gz,,$@)/, $^)
 	rm $(subst .tar.gz,,$@)
 
-rpm14: $(STARBALL14)
-	MAKE_ROOT=`pwd` rpmbuild -bb SPECS/pg_store_plans14.spec
+rpm17: $(STARBALL17)
+	MAKE_ROOT=`pwd` rpmbuild -bb SPECS/pg_store_plans17.spec
 
 testfiles: convert.out convert.sql
 
@@ -79,7 +80,7 @@ convert.out: convert.sql
 	psql $(DBNAME) -a -q -X -f convert.sql > $@
 
 convert.sql: makeplanfile.sql json2sql.pl
-	psql $(DBNAME) -X -f makeplanfile.sql  2>&1 | ./json2sql.pl > $@
+	psql $(DBNAME) -X -f makeplanfile.sql |& ./json2sql.pl > $@
 
 clean-testfiles:
 	rm -f convert.out convert.sql
