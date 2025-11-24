@@ -2,7 +2,7 @@
  *
  * pgsp_json.c: Plan handler for JSON/XML/YAML style plans
  *
- * Copyright (c) 2012-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ * Copyright (c) 2012-2025, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  *
  * IDENTIFICATION
  *	  pg_store_plans/pgsp_json.c
@@ -24,18 +24,72 @@
 #else
 #include "common/jsonapi.h"
 #endif
+#if PG_VERSION_NUM >= 170000
+#include "mb/pg_wchar.h"
+#endif
 #include "pgsp_json.h"
 #include "pgsp_json_int.h"
 
-#if PG_VERSION_NUM >= 160000
+
+
+#if PG_VERSION_NUM < 160000
 #include "parser/gram.h"
-#define JSON_FUNCTION_RETURN_TYPE JsonParseErrorType
-#define JSON_FUNCTION_RETURN_VALUE JSON_SUCCESS
+#define JsonParseErrorType void
+#define JSONACTION_RETURN_SUCCESS()
 #else
-#include "parser/gram.h"
-#include "nodes/nodes.h"
-#define JSON_FUNCTION_RETURN_TYPE void
-#define JSON_FUNCTION_RETURN_VALUE 
+/* In PG16, include/scan.h was gone. Define required symbols manually.. */
+/* must be in sync with src/backend/parser/gram.h */
+enum pgsptokentype
+{
+    IDENT = 258,                   /* IDENT  */
+    FCONST = 260,                  /* FCONST  */
+    SCONST = 261,                  /* SCONST  */
+    BCONST = 263,                  /* BCONST  */
+    XCONST = 264,                  /* XCONST  */
+    Op = 265,                      /* Op  */
+    ICONST = 266,                  /* ICONST  */
+#if PG_VERSION_NUM >= 180000
+	CURRENT_CATALOG = 359,         /* CURRENT_CATALOG  */
+	CURRENT_DATE = 360,            /* CURRENT_DATE  */
+	CURRENT_ROLE = 361,            /* CURRENT_ROLE  */
+	CURRENT_SCHEMA = 362,          /* CURRENT_SCHEMA  */
+	CURRENT_TIME = 363,            /* CURRENT_TIME  */
+	CURRENT_TIMESTAMP = 364,       /* CURRENT_TIMESTAMP  */
+	CURRENT_USER = 365,            /* CURRENT_USER  */
+	FALSE_P = 419,                 /* FALSE_P  */
+	LOCALTIME = 513,               /* LOCALTIME  */
+	LOCALTIMESTAMP = 514,          /* LOCALTIMESTAMP  */
+	NULL_P = 553,                  /* NULL_P  */
+	TRUE_P = 710,                  /* TRUE_P  */
+#elif PG_VERSION_NUM >= 170000
+    CURRENT_CATALOG = 359,         /* CURRENT_CATALOG  */
+    CURRENT_DATE = 360,            /* CURRENT_DATE  */
+    CURRENT_ROLE = 361,            /* CURRENT_ROLE  */
+    CURRENT_SCHEMA = 362,          /* CURRENT_SCHEMA  */
+    CURRENT_TIME = 363,            /* CURRENT_TIME  */
+    CURRENT_TIMESTAMP = 364,       /* CURRENT_TIMESTAMP  */
+    CURRENT_USER = 365,            /* CURRENT_USER  */
+    FALSE_P = 418,                 /* FALSE_P  */
+    LOCALTIME = 512,               /* LOCALTIME  */
+    LOCALTIMESTAMP = 513,          /* LOCALTIMESTAMP  */
+    NULL_P = 552,                  /* NULL_P  */
+    TRUE_P = 708,                  /* TRUE_P  */
+#else
+    CURRENT_CATALOG = 358,         /* CURRENT_CATALOG  */
+    CURRENT_DATE = 359,            /* CURRENT_DATE  */
+    CURRENT_ROLE = 360,            /* CURRENT_ROLE  */
+    CURRENT_SCHEMA = 361,          /* CURRENT_SCHEMA  */
+    CURRENT_TIME = 362,            /* CURRENT_TIME  */
+    CURRENT_TIMESTAMP = 363,       /* CURRENT_TIMESTAMP  */
+    CURRENT_USER = 364,            /* CURRENT_USER  */
+    FALSE_P = 415,                 /* FALSE_P  */
+    LOCALTIME = 502,               /* LOCALTIME  */
+    LOCALTIMESTAMP = 503,          /* LOCALTIMESTAMP  */
+    NULL_P = 540,                  /* NULL_P  */
+    TRUE_P = 689,                  /* TRUE_P  */
+#endif
+};
+#define JSONACTION_RETURN_SUCCESS() return JSON_SUCCESS
 #endif
 
 #define INDENT_STEP 2
@@ -45,32 +99,35 @@ void normalize_expr(char *expr, bool preserve_space);
 static const char *converter_core(word_table *tbl,
 						 const char *src, pgsp_parser_mode mode);
 
-static JSON_FUNCTION_RETURN_TYPE json_objstart(void *state);
-static JSON_FUNCTION_RETURN_TYPE json_objend(void *state);
-static JSON_FUNCTION_RETURN_TYPE json_arrstart(void *state);
-static JSON_FUNCTION_RETURN_TYPE json_arrend(void *state);
-static JSON_FUNCTION_RETURN_TYPE json_ofstart(void *state, char *fname, bool isnull);
-static JSON_FUNCTION_RETURN_TYPE json_aestart(void *state, bool isnull);
-static JSON_FUNCTION_RETURN_TYPE json_scalar(void *state, char *token, JsonTokenType tokentype);
+static JsonParseErrorType json_objstart(void *state);
+static JsonParseErrorType json_objend(void *state);
+static JsonParseErrorType json_arrstart(void *state);
+static JsonParseErrorType json_arrend(void *state);
+static JsonParseErrorType json_ofstart(void *state, char *fname, bool isnull);
+static JsonParseErrorType json_aestart(void *state, bool isnull);
+static JsonParseErrorType json_scalar(void *state, char *token,
+									  JsonTokenType tokentype);
 
-static JSON_FUNCTION_RETURN_TYPE yaml_objstart(void *state);
-static JSON_FUNCTION_RETURN_TYPE yaml_objend(void *state);
-static JSON_FUNCTION_RETURN_TYPE yaml_arrstart(void *state);
-static JSON_FUNCTION_RETURN_TYPE yaml_arrend(void *state);
-static JSON_FUNCTION_RETURN_TYPE yaml_ofstart(void *state, char *fname, bool isnull);
-static JSON_FUNCTION_RETURN_TYPE yaml_aestart(void *state, bool isnull);
-static JSON_FUNCTION_RETURN_TYPE yaml_scalar(void *state, char *token, JsonTokenType tokentype);
+static JsonParseErrorType yaml_objstart(void *state);
+static JsonParseErrorType yaml_objend(void *state);
+static JsonParseErrorType yaml_arrstart(void *state);
+static JsonParseErrorType yaml_arrend(void *state);
+static JsonParseErrorType yaml_ofstart(void *state, char *fname, bool isnull);
+static JsonParseErrorType yaml_aestart(void *state, bool isnull);
+static JsonParseErrorType yaml_scalar(void *state, char *token,
+									  JsonTokenType tokentype);
 
 static void adjust_wbuf(pgspParserContext *ctx, int len);
 static char *hyphenate_words(pgspParserContext *ctx, char *src);
-static JSON_FUNCTION_RETURN_TYPE xml_objstart(void *state);
-static JSON_FUNCTION_RETURN_TYPE xml_objend(void *state);
-static JSON_FUNCTION_RETURN_TYPE xml_arrend(void *state);
-static JSON_FUNCTION_RETURN_TYPE xml_ofstart(void *state, char *fname, bool isnull);
-static JSON_FUNCTION_RETURN_TYPE xml_ofend(void *state, char *fname, bool isnull);
-static JSON_FUNCTION_RETURN_TYPE xml_aestart(void *state, bool isnull);
-static JSON_FUNCTION_RETURN_TYPE xml_aeend(void *state, bool isnull);
-static JSON_FUNCTION_RETURN_TYPE xml_scalar(void *state, char *token, JsonTokenType tokentype) ;
+static JsonParseErrorType xml_objstart(void *state);
+static JsonParseErrorType xml_objend(void *state);
+static JsonParseErrorType xml_arrend(void *state);
+static JsonParseErrorType xml_ofstart(void *state, char *fname, bool isnull);
+static JsonParseErrorType xml_ofend(void *state, char *fname, bool isnull);
+static JsonParseErrorType xml_aestart(void *state, bool isnull);
+static JsonParseErrorType xml_aeend(void *state, bool isnull);
+static JsonParseErrorType xml_scalar(void *state, char *token,
+									 JsonTokenType tokentype) ;
 
 static void init_json_semaction(JsonSemAction *sem,
 										  pgspParserContext *ctx);
@@ -181,6 +238,8 @@ word_table propfields[] =
 	{P_AvgSortSpcUsed,  "as" ,"Average Sort Space Used",NULL, false,  NULL,		SETTER(avg_sortspc_used)},
 	{P_PeakSortSpcUsed, "ps" ,"Peak Sort Space Used",NULL, false,  NULL,		SETTER(peak_sortspc_used)},
 	{P_PreSortedGroups, "pg" ,"Pre-sorted Groups"  ,NULL, false,  NULL,			NULL},
+
+	{P_Disabled,		"dn" ,"Disabled"		   ,NULL, false, NULL,			NULL},
 
 	{P_Invalid, NULL, NULL, NULL, false, NULL, NULL}
 };
@@ -432,7 +491,9 @@ conv_strategy(const char *src, pgsp_parser_mode mode)
 #define IS_CONST(tok) (tok == FCONST || tok == SCONST || tok == BCONST || \
 			tok == XCONST || tok == ICONST || tok == NULL_P || \
 		    tok == TRUE_P || tok == FALSE_P || \
-			tok == CURRENT_DATE || tok == CURRENT_TIME || \
+			tok == CURRENT_CATALOG || tok == CURRENT_DATE || \
+			tok == CURRENT_ROLE || tok == CURRENT_SCHEMA || \
+			tok == CURRENT_TIME || tok == CURRENT_TIMESTAMP || \
 			tok == CURRENT_USER || \
 		    tok == LOCALTIME || tok == LOCALTIMESTAMP)
 #define IS_INDENTED_ARRAY(v) ((v) == P_GroupKeys || (v) == P_HashKeys)
@@ -698,7 +759,7 @@ conv_partialmode(const char *src, pgsp_parser_mode mode)
 /**** Parser callbacks ****/
 
 /* JSON */
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_objstart(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -719,11 +780,11 @@ json_objstart(void *state)
 
 	if (ctx->mode == PGSP_JSON_INFLATE)
 		appendStringInfoChar(ctx->dest, '\n');
-	
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_objend(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -741,10 +802,10 @@ json_objend(void *state)
 	ctx->first = bms_del_member(ctx->first, ctx->level);
 	ctx->fname = NULL;
 
-	return JSON_FUNCTION_RETURN_VALUE;
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_arrstart(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -757,10 +818,11 @@ json_arrstart(void *state)
 	ctx->level++;
 	ctx->last_elem_is_object = true;
 	ctx->first = bms_add_member(ctx->first, ctx->level);
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_arrend(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -778,10 +840,11 @@ json_arrend(void *state)
 
 	appendStringInfoChar(ctx->dest, ']');
 	ctx->level--;
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_ofstart(void *state, char *fname, bool isnull)
 {
 	word_table *p;
@@ -801,7 +864,7 @@ json_ofstart(void *state, char *fname, bool isnull)
 				   (!p || !p->normalize_use));
 
 	if (ctx->remove)
-		return JSON_FUNCTION_RETURN_VALUE;
+		JSONACTION_RETURN_SUCCESS();
 
 	if (!bms_is_member(ctx->level, ctx->first))
 	{
@@ -842,10 +905,11 @@ json_ofstart(void *state, char *fname, bool isnull)
 		ctx->list_fname = fname;
 		ctx->wlist_level = 0;
 	}
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_ofend(void *state, char *fname, bool isnull)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -855,15 +919,16 @@ json_ofend(void *state, char *fname, bool isnull)
 		ctx->list_fname = NULL;
 		ctx->current_list = P_Invalid;
 	}
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_aestart(void *state, bool isnull)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
 	if (ctx->remove)
-		return JSON_FUNCTION_RETURN_VALUE;
+		JSONACTION_RETURN_SUCCESS();
 
 	if (IS_INDENTED_ARRAY(ctx->current_list) &&
 		ctx->wlist_level == 1)
@@ -890,17 +955,18 @@ json_aestart(void *state, bool isnull)
 	}
 
 	ctx->first = bms_del_member(ctx->first, ctx->level);
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_scalar(void *state, char *token, JsonTokenType tokentype)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
 	const char *val = token;
 
 	if (ctx->remove)
-		return JSON_FUNCTION_RETURN_VALUE;
+		JSONACTION_RETURN_SUCCESS();
 
 	if (ctx->valconverter)
 		val = ctx->valconverter(token, ctx->mode);
@@ -910,13 +976,13 @@ json_scalar(void *state, char *token, JsonTokenType tokentype)
 	else
 		appendStringInfoString(ctx->dest, val);
 	ctx->last_elem_is_object = false;
-	return JSON_FUNCTION_RETURN_VALUE;
 
+	JSONACTION_RETURN_SUCCESS();
 }
 
 
 /* YAML */
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 yaml_objstart(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -935,22 +1001,23 @@ yaml_objstart(void *state)
 
 	ctx->level++;
 	ctx->first = bms_add_member(ctx->first, ctx->level);
-	
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 yaml_objend(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
 
 	ctx->level--;
 	ctx->last_elem_is_object = true;
-	ctx->first = bms_del_member(ctx->first, ctx->level);	
-	return JSON_FUNCTION_RETURN_VALUE;
+	ctx->first = bms_del_member(ctx->first, ctx->level);
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 yaml_arrstart(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -963,18 +1030,21 @@ yaml_arrstart(void *state)
 
 	ctx->fname = NULL;
 	ctx->level++;
-	ctx->first = bms_add_member(ctx->first, ctx->level);	
-	return JSON_FUNCTION_RETURN_VALUE;
+	ctx->first = bms_add_member(ctx->first, ctx->level);
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 yaml_arrend(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
-	ctx->level--;	
-	return JSON_FUNCTION_RETURN_VALUE;
+	ctx->level--;
+
+	JSONACTION_RETURN_SUCCESS();
 }
-static JSON_FUNCTION_RETURN_TYPE
+
+static JsonParseErrorType
 yaml_ofstart(void *state, char *fname, bool isnull)
 {
 	word_table *p;
@@ -1000,11 +1070,12 @@ yaml_ofstart(void *state, char *fname, bool isnull)
 
 	ctx->valconverter = NULL;
 	ctx->fname = s;
-	ctx->valconverter = (p ? p->converter : NULL);	
-	return JSON_FUNCTION_RETURN_VALUE;
+	ctx->valconverter = (p ? p->converter : NULL);
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 yaml_aestart(void *state, bool isnull)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -1012,11 +1083,12 @@ yaml_aestart(void *state, bool isnull)
 	appendStringInfoString(ctx->dest, "\n");
 	ctx->first = bms_del_member(ctx->first, ctx->level);
 	appendStringInfoSpaces(ctx->dest, ctx->level * INDENT_STEP);
-	appendStringInfoString(ctx->dest, "- ");	
-	return JSON_FUNCTION_RETURN_VALUE;
+	appendStringInfoString(ctx->dest, "- ");
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 yaml_scalar(void *state, char *token, JsonTokenType tokentype)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -1030,24 +1102,26 @@ yaml_scalar(void *state, char *token, JsonTokenType tokentype)
 
 	json_scalar(state, token, tokentype);
 
-	ctx->last_elem_is_object = false;	
-	return JSON_FUNCTION_RETURN_VALUE;
+	ctx->last_elem_is_object = false;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
 
 /* XML */
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 xml_objstart(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
 
 	ctx->level ++;
-	ctx->first = bms_add_member(ctx->first, ctx->level);	
-	return JSON_FUNCTION_RETURN_VALUE;
+	ctx->first = bms_add_member(ctx->first, ctx->level);
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 xml_objend(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -1057,18 +1131,20 @@ xml_objend(void *state)
 	ctx->level--;
 	ctx->first = bms_del_member(ctx->first, ctx->level);
 
-	ctx->last_elem_is_object = true;	
-	return JSON_FUNCTION_RETURN_VALUE;
+	ctx->last_elem_is_object = true;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 xml_arrend(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
 
 	appendStringInfoChar(ctx->dest, '\n');
-	appendStringInfoSpaces(ctx->dest, (ctx->level + 1) * INDENT_STEP);	
-	return JSON_FUNCTION_RETURN_VALUE;
+	appendStringInfoSpaces(ctx->dest, (ctx->level + 1) * INDENT_STEP);
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
 static void
@@ -1098,7 +1174,7 @@ hyphenate_words(pgspParserContext *ctx, char *src)
 	return ctx->wbuf;
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 xml_ofstart(void *state, char *fname, bool isnull)
 {
 	word_table *p;
@@ -1140,11 +1216,11 @@ xml_ofstart(void *state, char *fname, bool isnull)
 		ctx->not_item = bms_add_member(ctx->not_item, ctx->level + 1);
 	else
 		ctx->not_item = bms_del_member(ctx->not_item, ctx->level + 1);
-		
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 xml_ofend(void *state, char *fname, bool isnull)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -1156,11 +1232,12 @@ xml_ofend(void *state, char *fname, bool isnull)
 
 	appendStringInfoString(ctx->dest, "</");
 	appendStringInfoString(ctx->dest, escape_xml(hyphenate_words(ctx, s)));
-	appendStringInfoChar(ctx->dest, '>');	
-	return JSON_FUNCTION_RETURN_VALUE;
+	appendStringInfoChar(ctx->dest, '>');
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 xml_aestart(void *state, bool isnull)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -1184,11 +1261,12 @@ xml_aestart(void *state, bool isnull)
 
 	appendStringInfoChar(ctx->dest, '\n');
 	appendStringInfoSpaces(ctx->dest, (ctx->level + 1) * INDENT_STEP);
-	appendStringInfoString(ctx->dest, tag);	
-	return JSON_FUNCTION_RETURN_VALUE;
+	appendStringInfoString(ctx->dest, tag);
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 xml_aeend(void *state, bool isnull)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -1209,11 +1287,12 @@ xml_aeend(void *state, bool isnull)
 	else
 		tag = "</Item>";
 	appendStringInfoString(ctx->dest, tag);
-	ctx->level--;	
-	return JSON_FUNCTION_RETURN_VALUE;
+	ctx->level--;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 xml_scalar(void *state, char *token, JsonTokenType tokentype)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -1226,8 +1305,9 @@ xml_scalar(void *state, char *token, JsonTokenType tokentype)
 		s = escape_xml(s);
 
 	appendStringInfoString(ctx->dest, s);
-	ctx->last_elem_is_object = false;	
-	return JSON_FUNCTION_RETURN_VALUE;
+	ctx->last_elem_is_object = false;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
 /********************************/
@@ -1300,12 +1380,14 @@ run_pg_parse_json(JsonLexContext *lex, JsonSemAction *sem)
 void
 init_json_lex_context(JsonLexContext *lex, char *json)
 {
+#if PG_VERSION_NUM >= 170000
+	makeJsonLexContextCstringLen(lex, json, strlen(json),
+								 GetDatabaseEncoding(), true);
+#else
 	lex->input = lex->token_terminator = lex->line_start = json;
 	lex->line_number = 1;
 	lex->input_length = strlen(json);
 	lex->strval = makeStringInfo();
-#if PG_VERSION_NUM >= 170000
-    lex->incremental = false;
 #endif
 }
 

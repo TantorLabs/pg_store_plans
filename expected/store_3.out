@@ -1,10 +1,10 @@
 SET client_min_messages = 'error';
 CREATE EXTENSION IF NOT EXISTS pg_store_plans;
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
-SELECT pg_typeof(pg_stat_statements_reset());
-        pg_typeof         
---------------------------
- timestamp with time zone
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+ t 
+---
+ t
 (1 row)
 
 SELECT pg_store_plans_reset();
@@ -114,10 +114,10 @@ SELECT test_explain();
 
 DROP FUNCTION test_explain();
 DROP TABLE t1;
-SELECT pg_typeof(pg_stat_statements_reset());
-        pg_typeof         
---------------------------
- timestamp with time zone
+SELECT pg_stat_statements_reset() IS NOT NULL AS t;
+ t 
+---
+ t
 (1 row)
 
 SELECT pg_store_plans_reset(); -- collision with plan id
@@ -138,7 +138,7 @@ SELECT sum(p.calls) FROM pg_stat_statements s JOIN pg_store_plans p ON (s.queryi
    1
 (1 row)
 
-SET pg_store_plans.min_duration TO '1s';
+SET pg_store_plans.min_duration TO '1000';
 SELECT 'sleep' as regress, pg_sleep(0.1);
  regress | pg_sleep 
 ---------+----------
@@ -149,19 +149,6 @@ SELECT sum(p.calls) FROM pg_stat_statements s JOIN pg_store_plans p ON (s.queryi
  sum 
 -----
    1
-(1 row)
-
-SET pg_store_plans.slow_statement_duration TO '1ms';
-SELECT 'sleep' as regress, pg_sleep(0.1);
- regress | pg_sleep 
----------+----------
- sleep   | 
-(1 row)
-
-SELECT sum(p.calls) FROM pg_stat_statements s JOIN pg_store_plans p ON (s.queryid = p.queryid) JOIN pg_database d ON (d.oid = s.dbid) WHERE s.query = 'SELECT $1 as regress, pg_sleep($2)';
- sum 
------
-   2
 (1 row)
 
 -- Check, that last_call and first_call not like 2000-01-01 00:00:00+00

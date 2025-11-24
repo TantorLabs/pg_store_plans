@@ -2,7 +2,7 @@
  *
  * pgsp_json_text.h: Text plan generator for pg_store_plans.
  *
- * Copyright (c) 2012-2021, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ * Copyright (c) 2012-2025, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
  *
  * IDENTIFICATION
  *	  pg_store_plans/pgsp_json_text.c
@@ -22,16 +22,16 @@
 #include "common/jsonapi.h"
 #endif
 #include "utils/builtins.h"
-#if PG_VERSION_NUM >= 160000
-#define JSON_FUNCTION_RETURN_TYPE JsonParseErrorType
-#define JSON_FUNCTION_RETURN_VALUE JSON_SUCCESS
-#else
-#define JSON_FUNCTION_RETURN_TYPE void
-#define JSON_FUNCTION_RETURN_VALUE
-#endif
 
 #include "pgsp_json_text.h"
 #include "pgsp_json_int.h"
+
+#if PG_VERSION_NUM < 160000
+#define JsonParseErrorType void
+#define JSONACTION_RETURN_SUCCESS()
+#else
+#define JSONACTION_RETURN_SUCCESS() return JSON_SUCCESS
+#endif
 
 static void clear_nodeval(node_vals *vals);
 static void print_current_node(pgspParserContext *ctx);
@@ -42,13 +42,16 @@ static void print_prop_if_exists(StringInfo s, char *prepstr,
 								 const char *prop, int leve, int exind);
 static void print_prop_if_nz(StringInfo s, char *prepstr,
 							 const char *prop, int leve, int exind);
-static JSON_FUNCTION_RETURN_TYPE json_text_objstart(void *state);
-static JSON_FUNCTION_RETURN_TYPE json_text_objend(void *state);
-static JSON_FUNCTION_RETURN_TYPE json_text_arrstart(void *state);
-static JSON_FUNCTION_RETURN_TYPE json_text_arrend(void *state);
-static JSON_FUNCTION_RETURN_TYPE json_text_ofstart(void *state, char *fname, bool isnull);
-static JSON_FUNCTION_RETURN_TYPE json_text_ofend(void *state, char *fname, bool isnull);
-static JSON_FUNCTION_RETURN_TYPE json_text_scalar(void *state, char *token, JsonTokenType tokentype);
+static JsonParseErrorType json_text_objstart(void *state);
+static JsonParseErrorType json_text_objend(void *state);
+static JsonParseErrorType json_text_arrstart(void *state);
+static JsonParseErrorType json_text_arrend(void *state);
+static JsonParseErrorType json_text_ofstart(void *state, char *fname,
+											bool isnull);
+static JsonParseErrorType json_text_ofend(void *state, char *fname,
+										  bool isnull);
+static JsonParseErrorType json_text_scalar(void *state, char *token,
+										   JsonTokenType tokentype);
 
 /* Parser callbacks for plan textization */
 
@@ -753,7 +756,7 @@ clear_nodeval(node_vals *vals)
 	memset(vals, 0, sizeof(node_vals));
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_text_objstart(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -775,11 +778,11 @@ json_text_objstart(void *state)
 		resetStringInfo(v->group_key);
 		resetStringInfo(v->hash_key);
 	}
-	return JSON_FUNCTION_RETURN_VALUE;
 
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_text_objend(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -831,10 +834,10 @@ json_text_objend(void *state)
 	ctx->last_elem_is_object = true;
 	ctx->level--;
 
-	return JSON_FUNCTION_RETURN_VALUE;
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_text_arrstart(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -844,10 +847,10 @@ json_text_arrstart(void *state)
 		ctx->wlist_level++;
 	}
 
-	return JSON_FUNCTION_RETURN_VALUE;
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_text_arrend(void *state)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -891,10 +894,11 @@ json_text_arrend(void *state)
 		}
 		ctx->wlist_level--;
 	}
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_text_ofstart(void *state, char *fname, bool isnull)
 {
 	word_table *p;
@@ -965,10 +969,11 @@ json_text_ofstart(void *state, char *fname, bool isnull)
 			ctx->section = p->tag;
 		ctx->setter = p->setter;
 	}
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_text_ofend(void *state, char *fname, bool isnull)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
@@ -1007,17 +1012,19 @@ json_text_ofend(void *state, char *fname, bool isnull)
 		}
 		clear_nodeval(v);
 	}
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
-static JSON_FUNCTION_RETURN_TYPE
+static JsonParseErrorType
 json_text_scalar(void *state, char *token, JsonTokenType tokentype)
 {
 	pgspParserContext *ctx = (pgspParserContext *)state;
 
 	if (ctx->setter)
 		ctx->setter(ctx->nodevals, token);
-	return JSON_FUNCTION_RETURN_VALUE;
+
+	JSONACTION_RETURN_SUCCESS();
 }
 
 char *
@@ -1031,9 +1038,7 @@ pgsp_json_textize(char *json)
 	init_parser_context(&ctx, PGSP_JSON_TEXTIZE, json, NULL, 0);
 
 	ctx.nodevals = (node_vals*)palloc0(sizeof(node_vals));
-	if (ctx.nodevals == NULL)
-		return NULL;
-		
+
 	sem.semstate = (void*)&ctx;
 	sem.object_start       = json_text_objstart;
 	sem.object_end         = json_text_objend;
