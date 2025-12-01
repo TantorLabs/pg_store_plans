@@ -75,6 +75,7 @@
 
 #include "pgsp_json.h"
 #include "pgsp_explain.h"
+#include "plan_error.h"
 
 PG_MODULE_MAGIC;
 
@@ -86,7 +87,7 @@ PG_MODULE_MAGIC;
 static const uint32 PGSP_PG_MAJOR_VERSION = PG_VERSION_NUM / 100;
 
 /* This constant defines the magic number in the stats file header */
-static const uint32 PGSP_FILE_HEADER = 0x20221214;
+static const uint32 PGSP_FILE_HEADER = 0x20251201;
 static int max_plan_len = 5000;
 
 /* XXX: Should USAGE_EXEC reflect execution time and/or buffer usage? */
@@ -116,7 +117,8 @@ typedef enum pgspVersion
 	PGSP_V1_6,
 	PGSP_V1_7,
 	/* PGSP_V1_7 interface is used for v1.8 */
-	PGSP_V1_9
+	PGSP_V1_9,
+	PGSP_V1_9_1
 } pgspVersion;
 
 /*
@@ -146,6 +148,8 @@ typedef struct Counters
 	double		max_time;			/* maximum execution time in msec */
 	double		mean_time;			/* mean execution time in msec */
 	double		sum_var_time;	/* sum of variances in execution time in msec */
+	double		mean_plan_error; 	/* plan estimation error */
+	double		mean_plan_error2; 	/* plan estimation error, normalized by execution time */
 	int64		rows;				/* total # of retrieved or affected rows */
 	int64		shared_blks_hit;	/* # of shared buffer hits */
 	int64		shared_blks_read;	/* # of shared disk blocks read */
@@ -348,6 +352,7 @@ PG_FUNCTION_INFO_V1(pg_store_plans);
 PG_FUNCTION_INFO_V1(pg_store_plans_1_6);
 PG_FUNCTION_INFO_V1(pg_store_plans_1_7);
 PG_FUNCTION_INFO_V1(pg_store_plans_1_9);
+PG_FUNCTION_INFO_V1(pg_store_plans_1_9_1);
 PG_FUNCTION_INFO_V1(pg_store_plans_shorten);
 PG_FUNCTION_INFO_V1(pg_store_plans_normalize);
 PG_FUNCTION_INFO_V1(pg_store_plans_jsonplan);
@@ -389,7 +394,7 @@ static void pgsp_ProcessUtility(PlannedStmt *pstmt, const char *queryString,
 static uint32 hash_query(const char* query);
 static void pgsp_store(char *plan, queryid_t queryId,
 		   double total_time, uint64 rows,
-		   const BufferUsage *bufusage);
+		   const BufferUsage *bufusage, PlanEstimatorContext *pectx);
 static void pg_store_plans_internal(FunctionCallInfo fcinfo,
 									pgspVersion api_version);
 static Size shared_mem_size(void);
@@ -575,7 +580,7 @@ _PG_init(void)
 
 	EmitWarningsOnPlaceholders("pg_store_plans");
 
-#if PG_VERSION_NUM < 150000	
+#if PG_VERSION_NUM < 150000
 	pgsp_shmem_request();
 #endif
 
@@ -980,8 +985,8 @@ pgsp_ExecutorStart(QueryDesc *queryDesc, int eflags)
 		(eflags & EXEC_FLAG_EXPLAIN_ONLY) == 0)
 	{
 		queryDesc->instrument_options |=
+			INSTRUMENT_ROWS |
 			(log_timing ? INSTRUMENT_TIMER : 0)|
-			(log_timing ? 0: INSTRUMENT_ROWS)|
 			(log_buffers ? INSTRUMENT_BUFFERS : 0);
 	}
 
@@ -1078,6 +1083,7 @@ pgsp_ExecutorEnd(QueryDesc *queryDesc)
 			queryid_t	  queryid;
 			ExplainState *es;
 			StringInfo	  es_str;
+			PlanEstimatorContext pectx;
 
 			es = NewExplainState();
 			es_str = es->str;
@@ -1103,6 +1109,14 @@ pgsp_ExecutorEnd(QueryDesc *queryDesc)
 			es_str->data[es_str->len - 1] = '}';
 
 			queryid = queryDesc->plannedstmt->queryId;
+
+			/*
+			 * Assess quality of the plan. All the indicators will be stored in
+			 * the pectx.
+			 */
+			(void) plan_error(queryDesc->planstate,
+							  queryDesc->totaltime->total, &pectx);
+
 #if PG_VERSION_NUM < 140000
 			/*
 			 * For versions before pg14, a queryid is only available if
@@ -1122,7 +1136,7 @@ pgsp_ExecutorEnd(QueryDesc *queryDesc)
 						queryid,
 						queryDesc->totaltime->total * 1000.0,	/* convert to msec */
 						queryDesc->estate->es_processed,
-						&queryDesc->totaltime->bufusage);
+						&queryDesc->totaltime->bufusage, &pectx);
 			pfree(es_str->data);
 		}
 	}
@@ -1228,7 +1242,7 @@ hash_query(const char* query)
 static void
 pgsp_store(char *plan, queryid_t queryId,
 		   double total_time, uint64 rows,
-		   const BufferUsage *bufusage)
+		   const BufferUsage *bufusage, PlanEstimatorContext *pectx)
 {
 	pgspHashKey key;
 	pgspEntry  *entry;
@@ -1318,7 +1332,7 @@ pgsp_store(char *plan, queryid_t queryId,
 		/* shorten_plan is terminated by NUL */
 		if (plan_storage == PLAN_STORAGE_SHMEM)
 			memcpy(SHMEM_PLAN_PTR(entry), shorten_plan, plan_len + 1);
-			
+
 
 		/* If needed, perform garbage collection while exclusive lock held */
 		if (do_gc)
@@ -1346,6 +1360,8 @@ pgsp_store(char *plan, queryid_t queryId,
 	e->counters.total_time += total_time;
 	if (e->counters.calls == 1)
 	{
+		e->counters.mean_plan_error = pectx->error;
+		e->counters.mean_plan_error2 = pectx->time_weighted_error;
 		e->counters.min_time = total_time;
 		e->counters.max_time = total_time;
 		e->counters.mean_time = total_time;
@@ -1357,6 +1373,22 @@ pgsp_store(char *plan, queryid_t queryId,
 		 * <http://www.johndcook.com/blog/standard_deviation/>
 		 */
 		double		old_mean = e->counters.mean_time;
+		double		old_error = e->counters.mean_plan_error;
+		double		old_error2 = e->counters.mean_plan_error2;
+
+		if (pectx->error >= 0)
+		{
+			/*
+			 * It always may happen that the plan was never executed because,
+			 * for example, all partitions were pruned. So, no reliable
+			 * advice may be provided here - we actually don't know how it will
+			 * behave with another constant set.
+			 */
+			e->counters.mean_plan_error +=
+								(pectx->error - old_error) / e->counters.calls;
+			e->counters.mean_plan_error2 +=
+				(pectx->time_weighted_error - old_error2) / e->counters.calls;
+		}
 
 		e->counters.mean_time +=
 			(total_time - old_mean) / e->counters.calls;
@@ -1435,11 +1467,20 @@ pg_store_plans_reset(PG_FUNCTION_ARGS)
 #define PG_STORE_PLANS_COLS_V1_6	26
 #define PG_STORE_PLANS_COLS_V1_7	28
 #define PG_STORE_PLANS_COLS_V1_9	30
-#define PG_STORE_PLANS_COLS			30	/* maximum of above */
+#define PG_STORE_PLANS_COLS_V1_9_1	32
+#define PG_STORE_PLANS_COLS			32	/* maximum of above */
 
 /*
  * Retrieve statement statistics.
  */
+Datum
+pg_store_plans_1_9_1(PG_FUNCTION_ARGS)
+{
+	pg_store_plans_internal(fcinfo, PGSP_V1_9_1);
+
+	return (Datum) 0;
+}
+
 Datum
 pg_store_plans_1_9(PG_FUNCTION_ARGS)
 {
@@ -1684,6 +1725,11 @@ pg_store_plans_internal(FunctionCallInfo fcinfo,
 		if (tmp.calls == 0)
 			continue;
 
+		if (api_version == PGSP_V1_9_1)
+		{
+			values[i++] =  Float8GetDatumFast(tmp.mean_plan_error);
+			values[i++] =  Float8GetDatumFast(tmp.mean_plan_error2);
+		}
 		values[i++] = Int64GetDatumFast(tmp.calls);
 		values[i++] = Float8GetDatumFast(tmp.total_time);
 		values[i++] = Float8GetDatumFast(tmp.min_time);
@@ -1735,6 +1781,7 @@ pg_store_plans_internal(FunctionCallInfo fcinfo,
 					 api_version == PGSP_V1_6 ? PG_STORE_PLANS_COLS_V1_6 :
 					 api_version == PGSP_V1_7 ? PG_STORE_PLANS_COLS_V1_7 :
 					 api_version == PGSP_V1_9 ? PG_STORE_PLANS_COLS_V1_9 :
+					 api_version == PGSP_V1_9_1 ? PG_STORE_PLANS_COLS_V1_9_1 :
 					 -1 /* fail if you forget to update this assert */ ));
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
