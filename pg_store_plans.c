@@ -374,9 +374,15 @@ static void pgsp_shmem_request(void);
 static void pgsp_shmem_startup(void);
 static void pgsp_shmem_shutdown(int code, Datum arg);
 static void pgsp_ExecutorStart(QueryDesc *queryDesc, int eflags);
+#if PG_VERSION_NUM >= 180000
 static void pgsp_ExecutorRun(QueryDesc *queryDesc,
 				 ScanDirection direction,
 							 uint64 count);
+#else
+static void pgsp_ExecutorRun(QueryDesc *queryDesc,
+				 ScanDirection direction,
+							 uint64 count, bool execute_once);
+#endif
 static void pgsp_ExecutorFinish(QueryDesc *queryDesc);
 static void pgsp_ExecutorEnd(QueryDesc *queryDesc);
 static void pgsp_ProcessUtility(PlannedStmt *pstmt, const char *queryString,
@@ -1013,6 +1019,7 @@ pgsp_ExecutorStart(QueryDesc *queryDesc, int eflags)
 /*
  * ExecutorRun hook: all we need do is track nesting depth
  */
+#if PG_VERSION_NUM >= 180000
 static void
 pgsp_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count)
 {
@@ -1032,6 +1039,27 @@ pgsp_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count)
 	}
 	PG_END_TRY();
 }
+#else
+static void
+pgsp_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count, bool execute_once)
+{
+	nested_level++;
+	PG_TRY();
+	{
+		if (prev_ExecutorRun)
+			prev_ExecutorRun(queryDesc, direction, count, execute_once);
+		else
+			standard_ExecutorRun(queryDesc, direction, count, execute_once);
+		nested_level--;
+	}
+	PG_CATCH();
+	{
+		nested_level--;
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+}
+#endif
 
 /*
  * ExecutorFinish hook: all we need do is track nesting depth
@@ -1467,7 +1495,7 @@ pg_store_plans_1_6(PG_FUNCTION_ARGS)
 Datum
 pg_store_plans(PG_FUNCTION_ARGS)
 {
-	pg_store_plans_internal(fcinfo, PGSP_V1_5);
+	pg_store_plans_internal(fcinfo, PGSP_V1_9);
 
 	return (Datum) 0;
 }
