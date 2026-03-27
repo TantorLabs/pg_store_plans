@@ -1,3 +1,4 @@
+-- Copyright (c) 2012-2025, NTT, Inc.
 \set format json
 \pset pager
 

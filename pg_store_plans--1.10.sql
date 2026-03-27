@@ -1,10 +1,10 @@
-/* pg_store_plans/pg_store_plans--1.6.sql */
+/* pg_store_plans/pg_store_plans--1.10.sql */
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pg_store_plans" to load this file. \quit
 
 --- Define pg_store_plans_info
-CREATE FUNCTION pg_store_plans_info(
+CREATE OR REPLACE FUNCTION pg_store_plans_info(
     OUT dealloc bigint,
     OUT stats_reset timestamp with time zone
 )
@@ -12,47 +12,47 @@ RETURNS record
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT VOLATILE PARALLEL SAFE;
 
-CREATE VIEW pg_store_plans_info AS
+CREATE OR REPLACE VIEW pg_store_plans_info AS
   SELECT * FROM pg_store_plans_info();
 
 GRANT SELECT ON pg_store_plans_info TO PUBLIC;
 
 -- Register functions.
-CREATE FUNCTION pg_store_plans_reset()
+CREATE OR REPLACE FUNCTION pg_store_plans_reset()
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C PARALLEL SAFE;
-CREATE FUNCTION pg_store_plans_shorten(text)
+CREATE OR REPLACE FUNCTION pg_store_plans_shorten(text)
 RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C
 RETURNS NULL ON NULL INPUT PARALLEL SAFE;
-CREATE FUNCTION pg_store_plans_normalize(text)
+CREATE OR REPLACE FUNCTION pg_store_plans_normalize(text)
 RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C
 RETURNS NULL ON NULL INPUT PARALLEL SAFE;
-CREATE FUNCTION pg_store_plans_jsonplan(text)
+CREATE OR REPLACE FUNCTION pg_store_plans_jsonplan(text)
 RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C
 RETURNS NULL ON NULL INPUT PARALLEL SAFE;
-CREATE FUNCTION pg_store_plans_textplan(text)
+CREATE OR REPLACE FUNCTION pg_store_plans_textplan(text)
 RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C
 RETURNS NULL ON NULL INPUT PARALLEL SAFE;
-CREATE FUNCTION pg_store_plans_yamlplan(text)
+CREATE OR REPLACE FUNCTION pg_store_plans_yamlplan(text)
 RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C
 RETURNS NULL ON NULL INPUT PARALLEL SAFE;
-CREATE FUNCTION pg_store_plans_xmlplan(text)
+CREATE OR REPLACE FUNCTION pg_store_plans_xmlplan(text)
 RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C
 RETURNS NULL ON NULL INPUT PARALLEL SAFE;
-CREATE FUNCTION pg_store_plans_hash_query(text)
+CREATE OR REPLACE FUNCTION pg_store_plans_hash_query(text)
 RETURNS oid
 AS 'MODULE_PATHNAME'
 LANGUAGE C
@@ -80,18 +80,22 @@ CREATE FUNCTION pg_store_plans(
     OUT local_blks_written int8,
     OUT temp_blks_read int8,
     OUT temp_blks_written int8,
-    OUT blk_read_time float8,
-    OUT blk_write_time float8,
+    OUT shared_blk_read_time float8,
+    OUT shared_blk_write_time float8,
+    OUT local_blk_read_time float8,
+    OUT local_blk_write_time float8,
+    OUT temp_blk_read_time float8,
+    OUT temp_blk_write_time float8,
     OUT first_call timestamptz,
     OUT last_call timestamptz
 )
 RETURNS SETOF record
-AS 'MODULE_PATHNAME', 'pg_store_plans_1_6'
+AS 'MODULE_PATHNAME', 'pg_store_plans_1_10'
 LANGUAGE C
 VOLATILE PARALLEL SAFE;
 
 -- Register a view on the function for ease of use.
-CREATE VIEW pg_store_plans AS
+CREATE OR REPLACE VIEW pg_store_plans AS
   SELECT * FROM pg_store_plans();
 
 GRANT SELECT ON pg_store_plans TO PUBLIC;

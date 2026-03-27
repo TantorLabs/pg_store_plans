@@ -1,7 +1,8 @@
 # pg_stat_plan/Makefile
+# Copyright (c) 2012-2025, NTT, Inc.
 
 MODULES = pg_store_plans
-STOREPLANSVER = 1.10
+STOREPLANSVER = 1.10.1
 
 MODULE_big = pg_store_plans
 OBJS = pg_store_plans.o pgsp_json.o pgsp_json_text.o pgsp_explain.o
@@ -10,43 +11,23 @@ EXTENSION = pg_store_plans
 
 PG_VERSION := $(shell pg_config --version | sed "s/^PostgreSQL //" | sed "s/\.[0-9]*$$//")
 
-DATA = pg_store_plans--1.6.sql pg_store_plans--1.6--1.6.1.sql \
-       pg_store_plans--1.6.1--1.6.2.sql pg_store_plans--1.6.2--1.6.3.sql \
-       pg_store_plans--1.6.3--1.6.4.sql pg_store_plans--1.6.4--1.8.sql pg_store_plans--1.8--1.8.1.sql \
-	   pg_store_plans--1.8.1--1.9.sql pg_store_plans--1.9--1.9.1.sql pg_store_plans--1.9.1--1.9.2.sql \
-       pg_store_plans--1.9.2--1.9.3.sql pg_store_plans--1.9.3--1.10.sql
+DATA = pg_store_plans--1.10.sql pg_store_plans--1.10--1.10.1.sql
 
 REGRESS = convert store
 REGRESS_OPTS = --temp-config=regress.conf
 ifdef USE_PGXS
-    PG_CONFIG = pg_config
-    PG_MAJOR_VERSION := $(shell pg_config --version | awk '{print $$2}' | cut -d '.' -f1)
-    ifneq (,$(filter $(PG_MAJOR_VERSION),16 17 18))
-        ifeq ($(USE_PGXS),1)
-            ifndef PATH_TO_SOURCE_CODE
-                $(error PATH_TO_SOURCE_CODE is not set for PostgreSQL $(PG_MAJOR_VERSION). Aborting build.)
-            endif
-            ifeq ($(wildcard $(PATH_TO_SOURCE_CODE)/parser/gram.h),)
-                $(error FILE NOT FOUND: $(PATH_TO_SOURCE_CODE)/parser/gram.h. You need to give the path to src/backend/)
-            endif
-            PG_CPPFLAGS += -I$(PATH_TO_SOURCE_CODE)
-        endif
-    endif
-    PGXS := $(shell $(PG_CONFIG) --pgxs)
-    include $(PGXS)
+PG_CONFIG = pg_config
+PGXS := $(shell $(PG_CONFIG) --pgxs)
+include $(PGXS)
 else
-    subdir = contrib/pg_store_plans
-    top_builddir = ../..
-    PG_MAJOR_VERSION := $(shell ../../configure --version | grep 'PostgreSQL configure' | awk '{print $$3}' | cut -d '.' -f1)
-    ifneq (,$(filter $(PG_MAJOR_VERSION),16 17 18))
-        PG_CPPFLAGS += -I"../../src/backend"
-    endif
-    include $(top_builddir)/src/Makefile.global
-    include $(top_srcdir)/contrib/contrib-global.mk
+subdir = contrib/pg_store_plans
+top_builddir = ../..
+include $(top_builddir)/src/Makefile.global
+include $(top_srcdir)/contrib/contrib-global.mk
 endif
 
-STARBALL17 = pg_store_plans17-$(STOREPLANSVER).tar.gz
-STARBALLS = $(STARBALL17)
+STARBALL18 = pg_store_plans18-$(STOREPLANSVER).tar.gz
+STARBALLS = $(STARBALL18)
 
 TARSOURCES = Makefile *.c  *.h \
 	pg_store_plans--*.sql \
@@ -60,7 +41,7 @@ endif
 ## These entries need running server
 DBNAME = postgres
 
-rpms: rpm17
+rpms: rpm18
 
 $(STARBALLS): $(TARSOURCES)
 	if [ -h $(subst .tar.gz,,$@) ]; then rm $(subst .tar.gz,,$@); fi
@@ -72,8 +53,8 @@ $(STARBALLS): $(TARSOURCES)
 	tar -chzf $@ $(addprefix $(subst .tar.gz,,$@)/, $^)
 	rm $(subst .tar.gz,,$@)
 
-rpm17: $(STARBALL17)
-	MAKE_ROOT=`pwd` rpmbuild -bb SPECS/pg_store_plans17.spec
+rpm18: $(STARBALL18)
+	MAKE_ROOT=`pwd` rpmbuild -bb SPECS/pg_store_plans18.spec
 
 testfiles: convert.out convert.sql
 

@@ -1,4 +1,5 @@
 #! /usr/bin/perl
+# Copyright (c) 2012-2025, NTT, Inc.
 
 print <<'EOS';
 \echo ###### Prepare for the test

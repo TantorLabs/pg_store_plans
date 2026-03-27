@@ -2,7 +2,8 @@
  *
  * pgsp_json.c: Plan handler for JSON/XML/YAML style plans
  *
- * Copyright (c) 2012-2025, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ * Copyright (c) 2008-2025, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2025, NTT, Inc.
  *
  * IDENTIFICATION
  *	  pg_store_plans/pgsp_json.c
@@ -11,12 +12,14 @@
  */
 
 #include "postgres.h"
+#if PG_VERSION_NUM >= 130000
+#include "mb/pg_wchar.h"
+#endif
 #include "miscadmin.h"
 #include "nodes/nodes.h"
 #include "nodes/parsenodes.h"
 #include "nodes/bitmapset.h"
 #include "parser/scanner.h"
-//#include "parser/gram.h"		since 16 version gram.h is private
 #include "utils/xml.h"
 #include "utils/json.h"
 #if PG_VERSION_NUM < 130000
@@ -24,71 +27,17 @@
 #else
 #include "common/jsonapi.h"
 #endif
-#if PG_VERSION_NUM >= 170000
-#include "mb/pg_wchar.h"
-#endif
 #include "pgsp_json.h"
 #include "pgsp_json_int.h"
-
-
 
 #if PG_VERSION_NUM < 160000
 #include "parser/gram.h"
 #define JsonParseErrorType void
-#define JSONACTION_RETURN_SUCCESS()
+#define JSONACTION_RETURN_SUCCESS() return
 #else
 /* In PG16, include/scan.h was gone. Define required symbols manually.. */
 /* must be in sync with src/backend/parser/gram.h */
-enum pgsptokentype
-{
-    IDENT = 258,                   /* IDENT  */
-    FCONST = 260,                  /* FCONST  */
-    SCONST = 261,                  /* SCONST  */
-    BCONST = 263,                  /* BCONST  */
-    XCONST = 264,                  /* XCONST  */
-    Op = 265,                      /* Op  */
-    ICONST = 266,                  /* ICONST  */
-#if PG_VERSION_NUM >= 180000
-	CURRENT_CATALOG = 359,         /* CURRENT_CATALOG  */
-	CURRENT_DATE = 360,            /* CURRENT_DATE  */
-	CURRENT_ROLE = 361,            /* CURRENT_ROLE  */
-	CURRENT_SCHEMA = 362,          /* CURRENT_SCHEMA  */
-	CURRENT_TIME = 363,            /* CURRENT_TIME  */
-	CURRENT_TIMESTAMP = 364,       /* CURRENT_TIMESTAMP  */
-	CURRENT_USER = 365,            /* CURRENT_USER  */
-	FALSE_P = 419,                 /* FALSE_P  */
-	LOCALTIME = 513,               /* LOCALTIME  */
-	LOCALTIMESTAMP = 514,          /* LOCALTIMESTAMP  */
-	NULL_P = 553,                  /* NULL_P  */
-	TRUE_P = 710,                  /* TRUE_P  */
-#elif PG_VERSION_NUM >= 170000
-    CURRENT_CATALOG = 359,         /* CURRENT_CATALOG  */
-    CURRENT_DATE = 360,            /* CURRENT_DATE  */
-    CURRENT_ROLE = 361,            /* CURRENT_ROLE  */
-    CURRENT_SCHEMA = 362,          /* CURRENT_SCHEMA  */
-    CURRENT_TIME = 363,            /* CURRENT_TIME  */
-    CURRENT_TIMESTAMP = 364,       /* CURRENT_TIMESTAMP  */
-    CURRENT_USER = 365,            /* CURRENT_USER  */
-    FALSE_P = 418,                 /* FALSE_P  */
-    LOCALTIME = 512,               /* LOCALTIME  */
-    LOCALTIMESTAMP = 513,          /* LOCALTIMESTAMP  */
-    NULL_P = 552,                  /* NULL_P  */
-    TRUE_P = 708,                  /* TRUE_P  */
-#else
-    CURRENT_CATALOG = 358,         /* CURRENT_CATALOG  */
-    CURRENT_DATE = 359,            /* CURRENT_DATE  */
-    CURRENT_ROLE = 360,            /* CURRENT_ROLE  */
-    CURRENT_SCHEMA = 361,          /* CURRENT_SCHEMA  */
-    CURRENT_TIME = 362,            /* CURRENT_TIME  */
-    CURRENT_TIMESTAMP = 363,       /* CURRENT_TIMESTAMP  */
-    CURRENT_USER = 364,            /* CURRENT_USER  */
-    FALSE_P = 415,                 /* FALSE_P  */
-    LOCALTIME = 502,               /* LOCALTIME  */
-    LOCALTIMESTAMP = 503,          /* LOCALTIMESTAMP  */
-    NULL_P = 540,                  /* NULL_P  */
-    TRUE_P = 689,                  /* TRUE_P  */
-#endif
-};
+#include "pgsp_token_types.h"
 #define JSONACTION_RETURN_SUCCESS() return JSON_SUCCESS
 #endif
 
@@ -307,7 +256,7 @@ word_table nodetypes[] =
 	{T_Invalid,		NULL, NULL, NULL, false, NULL, NULL}
 };
 
-word_table directions[] =
+static word_table directions[] =
 {
 	{T_Invalid,  "b" ,"Backward",	"Backward", false, NULL, NULL},
 	{T_Invalid,  "n" ,"NoMovement","",			false, NULL, NULL},
@@ -315,7 +264,7 @@ word_table directions[] =
 	{T_Invalid, NULL , NULL,		NULL,		false, NULL, NULL}
 };
 
-word_table relationships[] =
+static word_table relationships[] =
 {
 	{T_Invalid,  "o" ,"Outer", NULL, false, NULL, NULL},
 	{T_Invalid,  "i" ,"Inner", NULL, false, NULL, NULL},
@@ -335,7 +284,7 @@ word_table strategies[] =
 	{S_Invalid,	NULL, NULL, NULL, false, NULL, NULL}
 };
 
-word_table operations[] =
+static word_table operations[] =
 {
 	{T_Invalid,  "i" ,"Insert", NULL, false, NULL, NULL},
 	{T_Invalid,  "d" ,"Delete", NULL, false, NULL, NULL},
@@ -343,7 +292,7 @@ word_table operations[] =
 	{T_Invalid, NULL, NULL, NULL, false, NULL, NULL}
 };
 
-word_table jointypes[] =
+static word_table jointypes[] =
 {
 	{T_Invalid,  "i" ,"Inner", NULL, false, NULL, NULL},
 	{T_Invalid,  "l" ,"Left", NULL, false, NULL, NULL},
@@ -354,7 +303,7 @@ word_table jointypes[] =
 	{T_Invalid, NULL, NULL, NULL, false, NULL, NULL}
 };
 
-word_table setsetopcommands[] =
+static word_table setsetopcommands[] =
 {
 	{T_Invalid,  "i" ,"Intersect", NULL, false, NULL, NULL},
 	{T_Invalid,  "I" ,"Intersect All", NULL, false, NULL, NULL},
@@ -363,7 +312,7 @@ word_table setsetopcommands[] =
 	{T_Invalid, NULL, NULL, NULL, false, NULL, NULL}
 };
 
-word_table sortmethods[] =
+static word_table sortmethods[] =
 {
 	{T_Invalid,  "h" ,"top-N heapsort", NULL, false, NULL, NULL},
 	{T_Invalid,  "q" ,"quicksort", NULL, false, NULL, NULL},
@@ -373,14 +322,14 @@ word_table sortmethods[] =
 	{T_Invalid, NULL, NULL, NULL, false, NULL, NULL}
 };
 
-word_table sortspacetype[] =
+static word_table sortspacetype[] =
 {
 	{T_Invalid,  "d" ,"Disk",	NULL, false, NULL, NULL},
 	{T_Invalid,  "m" ,"Memory",NULL, false, NULL, NULL},
 	{T_Invalid, NULL, NULL, NULL, false, NULL, NULL}
 };
 
-word_table partialmode[] =
+static word_table partialmode[] =
 {
 	{T_Invalid,  "p" ,"Partial",	NULL, false, NULL, NULL},
 	{T_Invalid,  "f" ,"Finalize",NULL, false, NULL, NULL},
@@ -601,7 +550,7 @@ normalize_expr(char *expr, bool preserve_space)
 			if (lasttok == IDENT)
 			{
 				/* Identifiers are copied in case-sensitive manner. */
-				memcpy(wp, expr + i, i2 - i);
+				memmove(wp, expr + i, i2 - i);
 				wp += i2 - i;
 			}
 #if PG_VERSION_NUM >= 100000
@@ -1380,15 +1329,19 @@ run_pg_parse_json(JsonLexContext *lex, JsonSemAction *sem)
 void
 init_json_lex_context(JsonLexContext *lex, char *json)
 {
-#if PG_VERSION_NUM >= 170000
-	makeJsonLexContextCstringLen(lex, json, strlen(json),
-								 GetDatabaseEncoding(), true);
-#else
+#if PG_VERSION_NUM < 170000
+	memset(lex, 0, sizeof(JsonLexContext));
 	lex->input = lex->token_terminator = lex->line_start = json;
 	lex->line_number = 1;
 	lex->input_length = strlen(json);
+#if PG_VERSION_NUM >= 130000
+	lex->input_encoding = GetDatabaseEncoding();
+#endif							/* PG13+ */
 	lex->strval = makeStringInfo();
-#endif
+#else							/* PG17- */
+	makeJsonLexContextCstringLen(lex, json, strlen(json),
+								 GetDatabaseEncoding(), true);
+#endif							/* PG17+ */
 }
 
 static void

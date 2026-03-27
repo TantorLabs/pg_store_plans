@@ -3,7 +3,7 @@
  * pgsp_explain.c: extracted code from explain.c for explain of triggers.
  *
  * Copyright (c) 2008-2025, PostgreSQL Global Development Group
- * Copyright (c) 2012-2025, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ * Copyright (c) 2012-2025, NTT, Inc.
  *
  * IDENTIFICATION
  *	  pg_store_plans/pgsp_explain.c
